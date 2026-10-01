@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html>
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<style>
+  body { font-family: "Meiryo", "Hiragino Kaku Gothic ProN", sans-serif; font-size: 14px; margin: 12px; color: #222; background: #fff; }
+  .bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+  .today { font-size: 20px; font-weight: bold; }
+  button { font-size: 14px; padding: 6px 14px; cursor: pointer; }
+  input[type="date"] { font-size: 14px; padding: 4px; }
+  #msg { color: #666; }
+
+  table.board { border-collapse: collapse; width: 100%; }
+  table.board th, table.board td { border: 1px solid #999; padding: 6px 8px; vertical-align: top; }
+  table.board th { background: #1B5E4A; color: #fff; text-align: center; font-size: 14px; }
+  table.board th.rowhead { background: #f5c518; color: #222; width: 70px; text-align: center; }
+  table.board td { min-width: 130px; height: 54px; }
+  .nm { display: block; padding: 2px 0; }
+  .sym { color: #777; font-size: 12px; margin-left: 4px; }
+  .lead { color: #b00; font-weight: bold; }
+  .none { color: #bbb; }
+
+  .boxes { display: flex; gap: 14px; margin-top: 14px; flex-wrap: wrap; }
+  .box { border: 1px solid #999; border-radius: 4px; min-width: 220px; }
+  .box h3 { margin: 0; padding: 6px 8px; background: #1B5E4A; color: #fff; font-size: 14px; }
+  .box .in { padding: 8px; }
+  .sub { font-weight: bold; margin-top: 6px; color: #555; font-size: 13px; }
+
+  /* 夜勤の箱：入りと明けをはっきり分ける */
+  .nsec + .nsec { margin-top: 10px; padding-top: 10px; border-top: 2px solid #1B5E4A; }
+  .nhead { display: flex; justify-content: space-between; align-items: center;
+           font-weight: bold; font-size: 13px; padding: 3px 7px; border-radius: 3px; }
+  .nhead .cnt { font-weight: normal; font-size: 12px; color: #555; }
+  .nhead-in { background: #dfeee8; color: #14523f; }
+  .nhead-af { background: #f6efd9; color: #6b5312; }
+  .nlist { padding: 5px 3px 0; }
+  td.na { background: #f4f4f4; }
+  #printCap{display:none}
+  .event{display:none}
+@media print{
+  @page{size:A4 landscape;margin:8mm}
+  html,body{margin:0;font-size:11px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .gnav,.bar{display:none !important}
+  #printCap{display:block;font-size:18px;font-weight:bold;margin:0 0 6px}
+  table.board td{height:auto;padding:2px 5px;min-width:0}
+  table.board th{font-size:11px;padding:2px 5px}
+  .nm{padding:0}
+  .event{display:block;border:1px solid #999;margin:6px 0;min-height:40px}
+  .event .eh{background:#f5c518;color:#222;font-weight:bold;font-size:11px;padding:2px 6px;border-bottom:1px solid #999}
+  .boxes{margin-top:0}
+  .box h3{font-size:12px;margin:0 0 2px}
+  .nsec + .nsec{margin-top:5px;padding-top:5px}
+  .nhead{font-size:11px;padding:2px 5px}
+  .nlist{padding:3px 2px 0}
+}
+</style>
+</head>
+<body>
+<?!= nav ?>
+
+<div id="printCap"></div>
+<div class="bar">
+  <button id="prev">← 前日</button>
+  <button id="today">今日</button>
+  <button id="next">翌日 →</button>
+  <input type="date" id="d">
+  <span class="today" id="cap"></span>
+  <span id="msg"></span>
+  <button id="prbtn" onclick="doPrint()">印刷</button>
+</div>
+
+<table class="board">
+  <thead><tr id="head"></tr></thead>
+  <tbody id="body"></tbody>
+</table>
+
+<div class="event"><div class="eh">行事・連絡事項</div></div>
+
+<div class="boxes">
+  <div class="box"><h3>フリー</h3><div class="in" id="free"></div></div>
+  <div class="box"><h3>夜勤</h3><div class="in" id="night"></div></div>
+  <div class="box" id="etcbox" style="display:none"><h3>その他</h3><div class="in" id="etc"></div></div>
+</div>
+
+
+<script>
+var WD = ['日', '月', '火', '水', '木', '金', '土'];
+var DATA = null;
+
+function $(id) { return document.getElementById(id); }
+
+function esc(s) {
+  return String(s == null ? '' : s)
+    .split('&').join('&amp;').split('<').join('&lt;').split('>').join('&gt;');
+}
+
+function pad2(n) { return (n < 10 ? '0' : '') + n; }
+
+function doPrint() {
+  var c = $('printCap'), cap = $('cap');
+  if (c) c.textContent = (cap ? cap.textContent : '') + '　勤務者';
+  window.print();
+}
+
+function curDate() {
+  var s = $('d').value;
+  if (!s) return new Date();
+  var p = s.split('-');
+  return new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
+}
+
+function setDate(dt) {
+  $('d').value = dt.getFullYear() + '-' + pad2(dt.getMonth() + 1) + '-' + pad2(dt.getDate());
+  load();
+}
+
+function load() {
+  var dt = curDate();
+  var ym = dt.getFullYear() + '-' + pad2(dt.getMonth() + 1);
+  var day = dt.getDate();
+  $('cap').textContent = dt.getFullYear() + '年' + (dt.getMonth() + 1) + '月' + day + '日（' + WD[dt.getDay()] + '）';
+  $('msg').textContent = '読み込み中...';
+
+  google.script.run
+    .withSuccessHandler(function (json) {
+      DATA = JSON.parse(json);
+      $('msg').textContent = '';
+      render();
+    })
+    .withFailureHandler(function (e) { $('msg').textContent = 'エラー：' + e.message; })
+    .getDayBoardJson(ym, day);
+}
+
+function nameHtml(x) {
+  var mark = (x.leader && x.kind === 'night') ? ' <span class="lead">★</span>' : '';
+  return '<span class="nm" data-no="' + esc(x.no || '') + '">' + esc(x.name) + mark + '<span class="sym">' + esc(x.sym) + '</span></span>';
+}
+
+function listHtml(arr) {
+  if (!arr || !arr.length) return '<span class="none">-</span>';
+  var h = '';
+  for (var i = 0; i < arr.length; i++) h += nameHtml(arr[i]);
+  return h;
+}
+
+function cntTxt(arr) {
+  return ((arr && arr.length) ? arr.length : 0) + '人';
+}
+
+function render() {
+  var f = DATA.floors;
+  var i;
+
+  var head = '<th class="rowhead"></th>';
+  for (i = 0; i < f.length; i++) head += '<th>' + esc(f[i].label) + '</th>';
+  $('head').innerHTML = head;
+
+  var rows = [
+    { key: 'early', label: '早出' },
+    { key: 'day',   label: '日勤' },
+    { key: 'late',  label: '遅出' }
+  ];
+
+  var b = '';
+  // 日勤は 3階・3階南・4階には無い（奥さん確認済み）
+  var NO_DAY = { '3': 1, 'S': 1, '4': 1 };
+  for (var r = 0; r < rows.length; r++) {
+    b += '<tr><th class="rowhead">' + rows[r].label + '</th>';
+    for (i = 0; i < f.length; i++) {
+      if (rows[r].key === 'day' && NO_DAY[f[i].code]) { b += '<td class="na"></td>'; continue; }
+      b += '<td>' + listHtml(DATA.care[f[i].code][rows[r].key]) + '</td>';
+    }
+    b += '</tr>';
+  }
+
+  b += '<tr><th class="rowhead">看護</th>';
+  for (i = 0; i < f.length; i++) b += '<td>' + listHtml(DATA.kango[f[i].code]) + '</td>';
+  b += '</tr>';
+
+  $('body').innerHTML = b;
+
+  $('free').innerHTML = listHtml(DATA.free);
+  $('night').innerHTML =
+      '<div class="nsec">' +
+        '<div class="nhead nhead-in"><span>入り</span><span class="cnt">' + cntTxt(DATA.night) + '</span></div>' +
+        '<div class="nlist">' + listHtml(DATA.night) + '</div>' +
+      '</div>' +
+      '<div class="nsec">' +
+        '<div class="nhead nhead-af"><span>明け</span><span class="cnt">' + cntTxt(DATA.after) + '</span></div>' +
+        '<div class="nlist">' + listHtml(DATA.after) + '</div>' +
+      '</div>';
+
+  if (DATA.etc && DATA.etc.length) {
+    $('etcbox').style.display = '';
+    $('etc').innerHTML = listHtml(DATA.etc);
+  } else {
+    $('etcbox').style.display = 'none';
+  }
+}
+
+$('prev').onclick = function () { var d = curDate(); d.setDate(d.getDate() - 1); setDate(d); };
+$('next').onclick = function () { var d = curDate(); d.setDate(d.getDate() + 1); setDate(d); };
+$('today').onclick = function () { setDate(new Date()); };
+$('d').onchange = load;
+
+setDate(new Date());
+</script>
+<style>
+  .nm.mynm { background:#fff3b0; outline:2px solid #e0a800; border-radius:3px; }
+  #meBar2 { display:none; align-items:center; gap:6px; margin-left:10px; font-size:13px; }
+  body.readonly #meBar2 { display:inline-flex; }
+  @media print { #meBar2 { display:none !important; } }
+</style>
+<script>
+(function () {
+  var MY_NO = '';
+  try { MY_NO = localStorage.getItem('rokenMyNo') || ''; } catch (e) { MY_NO = ''; }
+
+  function paintMe() {
+    var ns = document.querySelectorAll('.nm');
+    for (var i = 0; i < ns.length; i++) {
+      if (MY_NO && ns[i].getAttribute('data-no') === MY_NO) ns[i].classList.add('mynm');
+      else ns[i].classList.remove('mynm');
+    }
+  }
+
+  if (typeof render === 'function') {
+    var orig = render;
+    render = function () { var r = orig.apply(this, arguments); paintMe(); return r; };
+  }
+
+  function addBar(list) {
+    var pr = document.getElementById('prbtn');
+    if (!pr || document.getElementById('meBar2')) return;
+    var sp = document.createElement('span');
+    sp.id = 'meBar2';
+    var h = ['あなた <select id="meSel2"><option value="">（あなたの名前を選んでください）</option>'];
+    for (var i = 0; i < list.length; i++) {
+      var no = String(list[i].no || ''), nm = String(list[i].name || '');
+      h.push('<option value="' + no + '"' + (no === MY_NO ? ' selected' : '') + '>' + nm + '</option>');
+    }
+    h.push('</select>');
+    sp.innerHTML = h.join('');
+    pr.parentNode.insertBefore(sp, pr.nextSibling);
+    document.getElementById('meSel2').addEventListener('change', function () {
+      MY_NO = this.value;
+      try { localStorage.setItem('rokenMyNo', MY_NO); } catch (e) {}
+      paintMe();
+    });
+    paintMe();
+  }
+
+  function askGuest(cb) {
+    try {
+      if (google.script.url && google.script.url.getLocation) {
+        google.script.url.getLocation(function (loc) {
+          var p = (loc && loc.parameter) || {};
+          if (p.no) MY_NO = String(p.no);
+          cb(p.guest === '1');
+        });
+        return;
+      }
+    } catch (e) {}
+    cb(false);
+  }
+  askGuest(function (g) {
+  google.script.run.withSuccessHandler(function (js) {
+    var me = null;
+    try { me = JSON.parse(js); } catch (e) { me = null; }
+    if (me && me.admin) { paintMe(); return; }
+    document.body.classList.add('readonly');
+    if (me && me.staffNo && !MY_NO) MY_NO = me.staffNo;
+    google.script.run.withSuccessHandler(function (js2) {
+      var list = [];
+      try { list = JSON.parse(js2) || []; } catch (e) { list = []; }
+      addBar(list);
+    }).getRequestStaffJson();
+  }).getCurrentUserJson(g);
+  });
+})();
+</script>
+</body>
+</html>

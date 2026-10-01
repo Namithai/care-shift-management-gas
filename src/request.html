@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html>
+<head>
+<base target="_top">
+<style>
+body{font-family:"Meiryo","Hiragino Kaku Gothic ProN",sans-serif;margin:0;padding:10px 14px;color:#222;}
+#bar{display:flex;flex-wrap:wrap;align-items:center;gap:14px;padding:8px 10px;background:#f2f5f8;border:1px solid #d7dee6;border-radius:6px;}
+#bar label{font-size:13px;}
+select,input[type=month]{font-size:14px;padding:3px 4px;}
+#save{font-size:14px;padding:5px 16px;cursor:pointer;}
+#msg{font-size:13px;color:#555;}
+.kindbox{border-left:1px solid #c8d2dc;padding-left:14px;}
+.kindbox label{margin-right:10px;cursor:pointer;}
+#pal,#pal2{display:none;flex-wrap:wrap;align-items:center;gap:8px;margin-top:8px;padding:8px 10px;background:#fbfcfd;border:1px solid #dde4ea;border-radius:6px;}
+#pal .lbl,#pal2 .lbl{font-size:13px;color:#444;}
+#pal button,#pal2 button{font-size:14px;padding:5px 12px;border:1px solid #b9c4ce;background:#fff;border-radius:4px;cursor:pointer;}
+#pal button.sel,#pal2 button.sel{background:#2d6cb5;border-color:#2d6cb5;color:#fff;font-weight:bold;}
+#note{font-size:12px;color:#666;margin:8px 2px 4px;}
+table.cal{border-collapse:collapse;margin-top:6px;}
+table.cal th{width:88px;padding:4px;font-size:13px;background:#eef2f6;border:1px solid #c8d2dc;}
+table.cal td{width:88px;height:56px;border:1px solid #c8d2dc;vertical-align:top;padding:3px;cursor:pointer;user-select:none;}
+table.cal td.empty{background:#fafafa;cursor:default;}
+table.cal td .d{font-size:13px;color:#444;}
+table.cal td .m{text-align:center;font-size:19px;line-height:28px;font-weight:bold;}
+table.cal td.on{background:#fff3cd;}
+table.cal td.on .m{color:#b8730a;}
+table.cal td.shp{background:#f1f3f5;}
+table.cal td.shp .m{color:#9aa4ad;}
+table.cal th.sun,table.cal td.sun .d{color:#c0392b;}
+table.cal th.sat,table.cal td.sat .d{color:#2471a3;}
+#count{margin-top:8px;font-size:13px;}
+#ask{display:none;align-items:center;gap:12px;margin:8px 0;padding:10px 12px;background:#fff3cd;border:1px solid #e0c86a;border-radius:6px;font-size:13px;}
+#ask button{font-size:14px;padding:5px 16px;cursor:pointer;}
+#askYes{background:#c0392b;color:#fff;border:1px solid #a5311f;border-radius:4px;}
+#askNo{background:#fff;border:1px solid #b9c4ce;border-radius:4px;}
+</style>
+</head>
+<body>
+<?!= nav ?>
+<div id="bar">
+  <label>スタッフ <select id="staff"></select></label>
+  <label>年月 <input type="month" id="ym"></label>
+  <span class="kindbox">
+    <label><input type="radio" name="kind" value="off"> 休みたい日</label>
+    <label><input type="radio" name="kind" value="work"> 出られる日</label>
+  </span>
+  <button id="save">保存</button>
+  <span id="msg"></span>
+</div>
+<div id="pal">
+  <span class="lbl">希望する勤務</span>
+  <span id="palbtns"></span>
+  <span class="lbl">フロア</span>
+  <select id="floor"></select>
+</div>
+<div id="pal2">
+  <span class="lbl">種類</span>
+  <span id="pal2btns"><button data-off="wish" class="sel">希望休</button><button data-off="paid">有給</button></span>
+  <span class="lbl" id="paidInfo"></span>
+</div>
+<div id="note"></div>
+<div id="ask">
+  <span id="askText"></span>
+  <button id="askYes">はい</button>
+  <button id="askNo">いいえ</button>
+</div>
+<div id="cal"></div>
+<div id="count"></div><script>
+var STAFF = [];
+var DATA = null;
+var MARKS = {};
+var DIRTY = false;
+var PENKIND = "";
+var OFFPEN = "wish";
+
+var FLOORNAME = { "3":"3階", "S":"3階南", "4":"4階", "5":"5階・6階", "N":"新館", "全":"施設全体" };
+var KINDORDER = ["早番","遅番","日勤","F勤","夜勤","看護"];
+var SKIPCODE = ["休","有","希","明"];
+var ASKFN = null;
+function ask(text, fn){
+  ASKFN = fn;
+  document.getElementById("askText").textContent = text;
+  document.getElementById("ask").style.display = "flex";
+}
+function askHide(){ document.getElementById("ask").style.display = "none"; ASKFN = null; }
+function askInit(){
+  document.getElementById("askYes").addEventListener("click", function(){ var f = ASKFN; askHide(); if (f) f(); });
+  document.getElementById("askNo").addEventListener("click", askHide);
+}
+function el(id){ return document.getElementById(id); }
+function msg(t, c){ el("msg").textContent = t || ""; el("msg").style.color = c || "#555"; }
+function kindKey(){ var r = document.querySelectorAll("input[name=kind]"); for (var i=0;i<r.length;i++){ if (r[i].checked) return r[i].value; } return "off"; }
+function setKind(k){ var r = document.querySelectorAll("input[name=kind]"); for (var i=0;i<r.length;i++){ r[i].checked = (r[i].value === k); } }
+function pad2(n){ return (n < 10 ? "0" : "") + n; }
+function nextMonth(){ var d = new Date(); d.setDate(1); d.setMonth(d.getMonth() + 1); return d.getFullYear() + "-" + pad2(d.getMonth() + 1); }
+function markedDays(){ var out = []; for (var k in MARKS){ if (MARKS.hasOwnProperty(k)) out.push(Number(k)); } out.sort(function(a,b){ return a - b; }); return out; }
+function isShiftPaid(d){ if (!DATA || kindKey() === "work") return false; var sd = DATA.paidShiftDays || []; for (var i=0;i<sd.length;i++){ if (Number(sd[i]) === Number(d)) return true; } return false; }
+function maxWish(){ return (DATA && DATA.staff && DATA.staff.maxWish) ? Number(DATA.staff.maxWish) : 0; }
+function overLimit(){ return kindKey() === "off" && maxWish() > 0 && wishDays().length > maxWish(); }
+function wishDays(){ var out=[]; for (var k in MARKS){ if (MARKS.hasOwnProperty(k) && MARKS[k] !== "有") out.push(Number(k)); } return out; }
+function paidDays(){ var out=[]; for (var k in MARKS){ if (MARKS.hasOwnProperty(k) && MARKS[k] === "有") out.push(Number(k)); } return out; }
+function paidLeft(){ if (!DATA || DATA.paidLeft === "" || DATA.paidLeft === null || DATA.paidLeft === undefined) return null; var n = Number(DATA.paidLeft); return isNaN(n) ? null : n; }
+function paidUsed(){ if (!DATA) return 0; var set = {}; var i; var sd = DATA.paidShiftDays || []; for (i=0;i<sd.length;i++) set[sd[i]] = true; var pd = paidDays(); for (i=0;i<pd.length;i++) set[pd[i]] = true; var n = 0; for (var k in set) n++; return (Number(DATA.paidUsedOther) || 0) + n; }
+function paidRemain(){ var l = paidLeft(); return (l === null) ? null : (l - paidUsed()); }
+function paidOver(){ return kindKey() === "off" && paidLeft() !== null && paidRemain() < 0; }
+function setOffPen(k){ OFFPEN = k; var bs = el("pal2btns").querySelectorAll("button"); for (var i=0;i<bs.length;i++){ bs[i].className = (bs[i].getAttribute("data-off") === k) ? "sel" : ""; } }
+function paidInfoText(){ var l = paidLeft(); var t = ""; if (l === null){ t = "有休残日数はスタッフマスタで未設定"; } else { t = "有休残 " + paidRemain() + "日（付与 " + l + "日・使用 " + paidUsed() + "日）"; } el("paidInfo").textContent = t; }
+var DEADLINE_DAY = 20; // 申請の締切日（対象月の前月のこの日まで）
+function deadlineNote(){
+  var ym = el("ym").value; if (!ym) return "";
+  var y = Number(ym.slice(0,4)), mo = Number(ym.slice(5,7));
+  var dl = new Date(y, mo - 2, DEADLINE_DAY, 23, 59, 59); // 前月20日の終わり
+  if (isNaN(dl.getTime())) return "";
+  if (new Date() > dl) return "締切（" + (dl.getMonth() + 1) + "月" + DEADLINE_DAY + "日）を過ぎています";
+  return "";
+}
+function updateCount(){
+  var n = markedDays().length;
+  var t, dlNote = deadlineNote();
+  if (kindKey() === "work"){
+    t = "出られる日 " + n + "日";
+  } else {
+    t = "希望休 " + wishDays().length + "日";
+    if (maxWish() > 0){ t += "（目安 " + maxWish() + "日）"; }
+    if (overLimit()){ t += " ← 目安を超えています"; }
+    t += "  ／  有給 " + paidDays().length + "日";
+    if (paidLeft() === null){ t += "（残日数は未設定）"; }
+    else { t += "（残 " + paidRemain() + "日）"; if (paidOver()){ t += " ← 残日数を超えています"; } }
+  }
+  if (dlNote){ t = dlNote + "  ／  " + t; }
+  if (DIRTY){ t += "   （未保存）"; }
+  el("count").textContent = t;
+  var warn = overLimit() || paidOver() || dlNote;
+  el("count").style.color = warn ? "#c0392b" : "#222";
+  el("count").style.fontWeight = warn ? "bold" : "normal";
+  paidInfoText();
+}
+function updateNote(){
+  if (kindKey() === "work"){ el("note").textContent = "紙の申請を見ながら、勤務を選んで日をクリックしてください。同じ勤務でもう一度クリックすると消えます。最後に「保存」を押します。"; }
+  else { el("note").textContent = "紙の申請を見ながら、「希望休」か「有給」を選んで日をクリックしてください。もう一度クリックすると消えます。最後に「保存」を押します。"; }
+}
+function start(){
+  el("ym").value = nextMonth();
+  el("staff").addEventListener("change", load);
+  el("ym").addEventListener("change", load);
+  el("save").addEventListener("click", save);
+  askInit();
+  var pb = el("pal2btns").querySelectorAll("button");
+  for (var q=0;q<pb.length;q++){ pb[q].addEventListener("click", function(){ setOffPen(this.getAttribute("data-off")); }); }
+  var r = document.querySelectorAll("input[name=kind]");
+  for (var i=0;i<r.length;i++){ r[i].addEventListener("change", function(){ DIRTY = true; showPal(); updateNote(); updateCount(); }); }
+  updateNote();
+  msg("読み込み中...");
+  google.script.run.withSuccessHandler(onStaff).withFailureHandler(fail).getRequestStaffJson();
+}
+function onStaff(json){
+  STAFF = JSON.parse(json);
+  var s = el("staff");
+  s.innerHTML = "";
+  var o0 = document.createElement("option");
+  o0.value = ""; o0.textContent = "-- 選んでください --";
+  s.appendChild(o0);
+  for (var i=0;i<STAFF.length;i++){
+    var o = document.createElement("option");
+    o.value = STAFF[i].no;
+    o.textContent = STAFF[i].no + "  " + STAFF[i].name + "（" + (STAFF[i].employment || "") + "）";
+    s.appendChild(o);
+  }
+  msg("スタッフを選んでください");
+}
+function load(){
+  var no = el("staff").value;
+  if (DIRTY && !confirm("保存していない変更があります。破棄して切り替えますか？")) { return; }
+  DIRTY = false;
+  if (!no){ el("cal").innerHTML = ""; el("count").textContent = ""; el("pal").style.display = "none"; msg("スタッフを選んでください"); return; }
+  msg("読み込み中...");
+  google.script.run.withSuccessHandler(onMonth).withFailureHandler(fail).getRequestMonthJson(el("ym").value, no);
+}
+function onMonth(json){
+  DATA = JSON.parse(json);
+  MARKS = {};
+  var k = null;
+  for (var i=0;i<DATA.marks.length;i++){
+    MARKS[DATA.marks[i].day] = (DATA.marks[i].kind === DATA.kindPaid) ? "有" : (DATA.marks[i].val || "");
+    if (!k) k = (DATA.marks[i].kind === DATA.kindWork) ? "work" : "off";
+  }
+  if (!k){ var emp = (DATA.staff && DATA.staff.employment) || ""; k = (emp.indexOf("常勤") >= 0 && emp.indexOf("非常勤") < 0) ? "off" : "work"; }
+  setKind(k);
+  PENKIND = "";
+  buildPal();
+  showPal();
+  updateNote();
+  render();
+  msg(DATA.marks.length ? "登録済みの申請を読み込みました" : "新規入力");
+}
+function usableSymbols(){
+  var out = [];
+  var s = DATA.symbols || [];
+  for (var i=0;i<s.length;i++){ if (SKIPCODE.indexOf(s[i].code) < 0) out.push(s[i]); }
+  return out;
+}
+function buildPal(){
+  var syms = usableSymbols();
+  var kinds = [];
+  for (var i=0;i<syms.length;i++){ if (syms[i].kind && kinds.indexOf(syms[i].kind) < 0) kinds.push(syms[i].kind); }
+  kinds.sort(function(a,b){
+    var ia = KINDORDER.indexOf(a); var ib = KINDORDER.indexOf(b);
+    if (ia < 0) ia = 99; if (ib < 0) ib = 99;
+    return ia - ib;
+  });
+  var box = el("palbtns");
+  box.innerHTML = "";
+  addBtn(box, "", "どれでも");
+  for (var j=0;j<kinds.length;j++){ addBtn(box, kinds[j], kinds[j]); }
+  var floors = [];
+  for (var f=0;f<syms.length;f++){ if (syms[f].floor && floors.indexOf(syms[f].floor) < 0) floors.push(syms[f].floor); }
+  var sel = el("floor");
+  sel.innerHTML = "";
+  for (var g=0;g<floors.length;g++){
+    var o = document.createElement("option");
+    o.value = floors[g];
+    o.textContent = FLOORNAME[floors[g]] || floors[g];
+    sel.appendChild(o);
+  }
+  if (DATA.mainFloor && floors.indexOf(DATA.mainFloor) >= 0) sel.value = DATA.mainFloor;
+  setPen("");
+}
+function addBtn(box, val, label){
+  var b = document.createElement("button");
+  b.textContent = label;
+  b.setAttribute("data-kind", val);
+  b.addEventListener("click", function(){ setPen(val); });
+  box.appendChild(b);
+}
+function setPen(k){
+  PENKIND = k;
+  var bs = el("palbtns").querySelectorAll("button");
+  for (var i=0;i<bs.length;i++){
+    bs[i].className = (bs[i].getAttribute("data-kind") === k) ? "sel" : "";
+  }
+}
+function showPal(){ el("pal").style.display = (kindKey() === "work") ? "flex" : "none"; el("pal2").style.display = (kindKey() === "work") ? "none" : "flex"; }
+function resolveVal(){
+  if (kindKey() !== "work") return (OFFPEN === "paid") ? "有" : "";
+  if (!PENKIND) return "";
+  var syms = usableSymbols();
+  var f = el("floor").value;
+  var i;
+  for (i=0;i<syms.length;i++){ if (syms[i].kind === PENKIND && syms[i].floor === f) return syms[i].code; }
+  for (i=0;i<syms.length;i++){ if (syms[i].kind === PENKIND && !syms[i].floor) return syms[i].code; }
+  for (i=0;i<syms.length;i++){ if (syms[i].kind === PENKIND) return syms[i].code; }
+  return PENKIND;
+}
+function render(){
+  var days = DATA.days;
+  var wnames = ["日","月","火","水","木","金","土"];
+  var first = wnames.indexOf(days[0].wd);
+  var html = "<table class=cal><tr>";
+  for (var w=0;w<7;w++){ html += "<th class=" + (w===0?"sun":(w===6?"sat":"wd")) + ">" + wnames[w] + "</th>"; }
+  html += "</tr><tr>";
+  for (var b=0;b<first;b++){ html += "<td class=empty></td>"; }
+  var col = first;
+  for (var d=0;d<days.length;d++){
+    if (col === 7){ html += "</tr><tr>"; col = 0; }
+    var wd = wnames.indexOf(days[d].wd);
+    var cls = (wd===0?"sun":(wd===6?"sat":"wd"));
+    var has = MARKS.hasOwnProperty(days[d].day);
+    if (has) cls += " on";
+    var sp0 = isShiftPaid(days[d].day);
+    if (!has && sp0) cls += " shp";
+    var txt = has ? (MARKS[days[d].day] === "" ? "○" : MARKS[days[d].day]) : (sp0 ? "有" : "");
+    html += "<td class=" + JSON.stringify(cls) + " data-day=" + days[d].day + ((!has && sp0) ? " title=\"シフト表で「有」が入っています（クリックすると申請にも入ります）\"" : "") + "><div class=d>" + days[d].day + "</div><div class=m>" + txt + "</div></td>";
+    col++;
+  }
+  while (col < 7){ html += "<td class=empty></td>"; col++; }
+  html += "</tr></table>";
+  el("cal").innerHTML = html;
+  var tds = el("cal").querySelectorAll("td[data-day]");
+  for (var i=0;i<tds.length;i++){ tds[i].addEventListener("click", onCell); }
+  updateCount();
+}
+function onCell(e){
+  var td = e.currentTarget;
+  var d = Number(td.getAttribute("data-day"));
+  var want = resolveVal();
+  if (MARKS.hasOwnProperty(d) && MARKS[d] === want){ delete MARKS[d]; }
+  else { MARKS[d] = (!MARKS.hasOwnProperty(d) && isShiftPaid(d)) ? "有" : want; }
+  var has = MARKS.hasOwnProperty(d);
+  var sp = isShiftPaid(d);
+  td.className = td.className.split(" on").join("").split(" shp").join("") + (has ? " on" : (sp ? " shp" : ""));
+  td.title = (!has && sp) ? "シフト表で「有」が入っています（クリックすると申請にも入ります）" : "";
+  td.querySelector(".m").textContent = has ? (MARKS[d] === "" ? "○" : MARKS[d]) : (sp ? "有" : "");
+  DIRTY = true;
+  updateCount();
+  // 稼働不可曜日の日に「出られる日」を入れたときは注意を出す（入れることはできる）
+  if (has && kindKey() === "work") {
+    var ngNote = ngDayNote(d);
+    if (ngNote) { msg(ngNote, "#b35c00"); } else { msg(""); }
+  }
+}
+var WEEK_JP = ["日","月","火","水","木","金","土"];
+function ngDayNote(d){
+  var ng = (DATA && DATA.staff && DATA.staff.ngDays) ? String(DATA.staff.ngDays) : "";
+  if (!ng) return "";
+  var ym = el("ym").value; if (!ym) return "";
+  var w = WEEK_JP[new Date(Number(ym.slice(0,4)), Number(ym.slice(5,7)) - 1, d).getDay()];
+  if (ng.indexOf(w) < 0) return "";
+  return "注意：" + d + "日（" + w + "）は、この人の稼働不可曜日（" + ng + "）です。入れることはできますが確認してください。";
+}
+function save(){
+  var no = el("staff").value;
+  if (!no){ msg("スタッフを選んでください", "#c0392b"); return; }
+  if (overLimit()){ ask("希望休の目安（" + maxWish() + "日）を超えています。このまま保存できます。よろしいですか？", doSave); return; }
+  if (paidOver()){ ask("有給が残日数（" + paidLeft() + "日）を超えています。このまま保存できます。よろしいですか？", doSave); return; }
+  doSave();
+}
+function doSave(){
+  var no = el("staff").value;
+  var ds = markedDays();
+  var items = [];
+  for (var i=0;i<ds.length;i++){ var isP = (kindKey() !== "work" && MARKS[ds[i]] === "有"); items.push({ day: ds[i], val: isP ? "" : MARKS[ds[i]], kind: isP ? "paid" : "" }); }
+  el("save").disabled = true;
+  msg("保存中...");
+  google.script.run.withSuccessHandler(function(r){
+    el("save").disabled = false; DIRTY = false; updateCount(); msg(r, "#1e7e34");
+  }).withFailureHandler(function(e){ el("save").disabled = false; fail(e); }).saveRequests(el("ym").value, no, kindKey(), items);
+}
+function fail(e){ msg("エラー: " + (e && e.message ? e.message : e), "#c0392b"); }
+start();
+</script>
+<script>
+// 管理者以外は、自分の分だけ入力できるようにする
+(function () {
+  google.script.run.withSuccessHandler(function (js) {
+    var me = null;
+    try { me = JSON.parse(js); } catch (e) { me = null; }
+    if (!me || me.admin || !me.staffNo) return;
+    var sel = document.getElementById('staff');
+    if (!sel) return;
+    var tries = 0;
+    var timer = setInterval(function () {
+      tries++;
+      if (sel.options.length > 1) {
+        for (var i = sel.options.length - 1; i >= 0; i--) {
+          if (sel.options[i].value !== me.staffNo) sel.remove(i);
+        }
+        if (sel.options.length === 1) {
+          sel.value = me.staffNo;
+          sel.dispatchEvent(new Event('change'));
+          var lab = sel.parentNode;
+          if (lab) {
+            var hint = document.createElement('span');
+            hint.style.cssText = 'margin-left:8px;font-size:12px;color:#666';
+            hint.textContent = '（自分の分だけ入力できます）';
+            lab.appendChild(hint);
+          }
+        }
+        clearInterval(timer);
+      } else if (tries > 40) {
+        clearInterval(timer);
+      }
+    }, 300);
+  }).getCurrentUserJson();
+})();
+</script>
+</body>
+</html>

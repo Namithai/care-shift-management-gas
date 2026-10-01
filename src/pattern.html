@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html>
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<style>
+  :root { --green:#1B5E4A; --line:#d8e0dc; --bg:#f5faf7; --text:#1e2d28; --muted:#6b7a74; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:"Noto Sans JP","Hiragino Kaku Gothic ProN",Meiryo,sans-serif; color:var(--text); background:var(--bg); font-size:14px; }
+  header { background:var(--green); color:#fff; padding:12px 20px; display:flex; align-items:center; gap:16px; }
+  header h1 { font-size:17px; margin:0; font-weight:700; }
+  .layout { display:flex; height:calc(100vh - 46px); }
+  .list-pane { flex:1 1 55%; overflow:auto; padding:14px 16px; }
+  .form-pane { flex:1 1 45%; overflow:auto; padding:14px 16px; background:#fff; border-left:1px solid var(--line); }
+  .filters { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px; align-items:center; }
+  .filters input[type=search] { padding:6px 8px; border:1px solid var(--line); border-radius:6px; background:#fff; width:180px; }
+  button { font-family:inherit; font-size:14px; cursor:pointer; border-radius:6px; padding:7px 14px; border:1px solid var(--green); background:#fff; color:var(--green); }
+  button.primary { background:var(--green); color:#fff; }
+  button:disabled { opacity:.5; cursor:default; }
+  table { width:100%; border-collapse:collapse; background:#fff; }
+  th, td { padding:7px 9px; border-bottom:1px solid var(--line); text-align:left; white-space:nowrap; }
+  th { background:var(--green); color:#fff; position:sticky; top:0; font-weight:600; }
+  tbody tr { cursor:pointer; }
+  tbody tr:hover { background:#eaf6f0; }
+  tbody tr.selected { background:#d6f0e3; }
+  .tag { font-size:11px; color:var(--muted); }
+  fieldset { border:1px solid var(--line); border-radius:8px; margin:0 0 14px; padding:12px 14px; }
+  legend { font-weight:700; color:var(--green); padding:0 6px; }
+  .field { margin-bottom:10px; }
+  .field label { display:block; font-size:12px; color:var(--muted); margin-bottom:3px; }
+  .field input[type=text] { width:100%; padding:6px 8px; border:1px solid var(--line); border-radius:6px; }
+  .field input[type=text]:disabled { background:#f2f5f4; color:var(--muted); }
+  .row2 { display:flex; gap:10px; }
+  .row2 > * { flex:1; }
+  .checks { display:flex; flex-wrap:wrap; gap:14px; }
+  .checks label { font-size:13px; display:inline-flex; align-items:center; gap:4px; color:var(--text); margin:0; }
+  .hint { font-size:12px; color:var(--muted); margin-top:3px; }
+  .actions { display:flex; gap:8px; position:sticky; bottom:0; background:#fff; padding:10px 0; border-top:1px solid var(--line); }
+  .msg { position:fixed; top:12px; left:50%; transform:translateX(-50%); z-index:50; padding:10px 20px; border-radius:8px; box-shadow:0 3px 12px rgba(0,0,0,.2); font-weight:700; display:none; }
+  .msg.err { background:#fdeaea; color:#a02b2b; display:block; }
+  .msg.ok { background:#e6f7ee; color:#14624a; display:block; }
+  .empty { color:var(--muted); padding:20px; text-align:center; }
+</style>
+</head>
+<body>
+<?!= nav ?>
+
+<header>
+  <h1>勤務パターンマスタ</h1>
+  <span id="count" style="font-size:13px;opacity:.85"></span>
+</header>
+
+<div class="layout">
+  <div class="list-pane">
+    <div class="filters">
+      <input type="search" id="q" placeholder="パターン名で検索">
+      <button class="primary" id="btnNew">新規追加</button>
+    </div>
+    <table>
+      <thead><tr><th>パターン名</th><th>開始</th><th>終了</th><th>対象フロア</th><th>説明</th></tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+    <div class="empty" id="empty" style="display:none">該当する勤務パターンがありません</div>
+  </div>
+
+  <div class="form-pane">
+    <div class="msg" id="msg"></div>
+
+    <fieldset>
+      <legend>基本情報</legend>
+      <div class="field"><label>パターン名</label><input type="text" id="name" placeholder="例）A3"></div>
+<div class="hint">パターン名は記号と結びついています。既存のパターン名は変えないでください（変えると自動生成や集計が合わなくなります）</div>
+      <div class="field">
+        <label>対象フロア</label>
+        <div class="checks"><label><input type="checkbox" id="allFloors"> 全フロア</label></div>
+        <div class="checks" id="floors" style="margin-top:8px"></div>
+      </div>
+      <div class="field"><label>説明</label><input type="text" id="desc" placeholder="例）早番"></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>勤務時間</legend>
+      <div class="field"><div class="checks">
+        <label><input type="checkbox" id="perStaff"> 勤務時間はスタッフごとに設定</label>
+        <label><input type="checkbox" id="overnight"> 日をまたぐ</label>
+      </div></div>
+      <div class="row2">
+        <div class="field"><label>開始時刻</label><input type="text" id="start" placeholder="例）7:30"></div>
+        <div class="field"><label>終了時刻</label><input type="text" id="end" placeholder="例）16:30"></div>
+      </div>
+      <div class="hint" id="perStaffHint" style="display:none">スタッフマスタの「F勤の勤務時間」を使います</div>
+      <div class="hint" id="overnightHint" style="display:none">終了時刻は翌日の時刻として扱います</div>
+    </fieldset>
+
+    <div class="actions">
+      <button class="primary" id="btnSave">保存</button>
+      <button id="btnCancel">取消</button>
+    </div>
+  </div>
+</div>
+
+<script>
+var PAT = [], OPTS = null, currentRow = 0;
+function $(id) { return document.getElementById(id); }
+
+function showMsg(text, kind) {
+  var m = $('msg'); m.textContent = text; m.className = 'msg ' + kind;
+  if (kind === 'ok') setTimeout(function () { m.className = 'msg'; }, 5000);
+}
+function fail(e) { showMsg(e && e.message ? e.message : String(e), 'err'); }
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+  });
+}
+
+function boot() {
+  google.script.run.withSuccessHandler(function (o) {
+    OPTS = o;
+    var box = $('floors'); box.innerHTML = '';
+    o.floors.forEach(function (f) {
+      var l = document.createElement('label');
+      l.innerHTML = '<input type="checkbox" value="' + f.code + '"> ' + f.code + '：' + f.label;
+      box.appendChild(l);
+    });
+    loadList();
+  }).withFailureHandler(fail).getPatternOptions();
+}
+
+function loadList() {
+  google.script.run.withSuccessHandler(function (list) {
+    PAT = list; render(); clearForm();
+  }).withFailureHandler(fail).getPatternList();
+}
+
+function render() {
+  var q = $('q').value.trim();
+  var rows = PAT.filter(function (p) {
+    return !q || p.name.indexOf(q) >= 0 || String(p.desc).indexOf(q) >= 0;
+  });
+  var tb = $('tbody'); tb.innerHTML = '';
+  rows.forEach(function (p) {
+    var tr = document.createElement('tr');
+    if (p.row === currentRow) tr.className = 'selected';
+    var st = p.perStaff ? '<span class="tag">スタッフごと</span>' : esc(p.start);
+    var en = p.perStaff ? '<span class="tag">スタッフごと</span>' : esc(p.end);
+    if (!p.perStaff && p.overnight) en = en + ' <span class="tag">翌日</span>';
+    var fl = (p.floors === '全') ? '全フロア' : esc(p.floors);
+    tr.innerHTML = '<td>' + esc(p.name) + '</td><td>' + st + '</td><td>' + en +
+      '</td><td>' + fl + '</td><td>' + esc(p.desc) + '</td>';
+    tr.onclick = function () { selectPattern(p.row); };
+    tb.appendChild(tr);
+  });
+  $('empty').style.display = rows.length ? 'none' : 'block';
+  $('count').textContent = rows.length + ' 件 / 全 ' + PAT.length + ' 件';
+}
+
+function selectPattern(row) {
+  var p = PAT.filter(function (x) { return x.row === row; })[0];
+  if (!p) return;
+  currentRow = row; setForm(p); render();
+}
+
+function clearForm() {
+  currentRow = 0;
+  setForm({ name:'', start:'', end:'', floors:'', desc:'', overnight:false, perStaff:false });
+  render();
+}
+
+function setForm(p) {
+  $('name').value = p.name;
+  $('desc').value = p.desc;
+  $('start').value = p.start;
+  $('end').value = p.end;
+  $('overnight').checked = !!p.overnight;
+  $('perStaff').checked = !!p.perStaff;
+
+  var all = String(p.floors || '').trim() === '全';
+  $('allFloors').checked = all;
+  var codes = String(p.floors || '').split(',').map(function (x) { return x.trim(); });
+  Array.prototype.forEach.call($('floors').querySelectorAll('input'), function (c) {
+    c.checked = !all && codes.indexOf(c.value) >= 0;
+  });
+
+  toggleAll();
+  togglePerStaff();
+}
+
+function toggleAll() {
+  var all = $('allFloors').checked;
+  Array.prototype.forEach.call($('floors').querySelectorAll('input'), function (c) {
+    c.disabled = all;
+    if (all) c.checked = false;
+  });
+}
+
+function togglePerStaff() {
+  var per = $('perStaff').checked;
+  $('start').disabled = per;
+  $('end').disabled = per;
+  if (per) { $('start').value = ''; $('end').value = ''; }
+  $('perStaffHint').style.display = per ? 'block' : 'none';
+  toggleOvernight();
+}
+
+function toggleOvernight() {
+  $('overnightHint').style.display = ($('overnight').checked && !$('perStaff').checked) ? 'block' : 'none';
+}
+
+function collectFloors() {
+  if ($('allFloors').checked) return '全';
+  var out = [];
+  Array.prototype.forEach.call($('floors').querySelectorAll('input:checked'), function (c) { out.push(c.value); });
+  return out.join(',');
+}
+
+function getForm() {
+  return { row: currentRow,
+    name: $('name').value.trim(),
+    start: $('start').value.trim(),
+    end: $('end').value.trim(),
+    floors: collectFloors(),
+    desc: $('desc').value.trim(),
+    overnight: $('overnight').checked,
+    perStaff: $('perStaff').checked };
+}
+
+$('btnSave').onclick = function () {
+  var f = getForm();
+  if (currentRow) {
+    var orig = PAT.filter(function (x) { return x.row === currentRow; })[0];
+    if (orig && orig.name !== f.name) {
+      if (!confirm('パターン名を「' + orig.name + '」から「' + f.name + '」に変えようとしています。\nパターン名は記号と結びついているので、変えると自動生成や集計が合わなくなります。\n本当に変えますか？')) return;
+    }
+  }
+  $('btnSave').disabled = true;
+  google.script.run
+    .withSuccessHandler(function (list) {
+      PAT = list; $('btnSave').disabled = false; $('btnSave').blur();
+      showMsg('保存しました', 'ok');
+      // 保存したパターンをそのまま表示し続ける（フォームは空にしない）
+      var saved = PAT.filter(function (x) { return x.name === f.name; })[0];
+      if (saved) { currentRow = saved.row; setForm(saved); render(); } else { clearForm(); }
+    })
+    .withFailureHandler(function (e) { $('btnSave').disabled = false; fail(e); })
+    .savePattern(getForm());
+};
+$('btnCancel').onclick = function () { clearForm(); };
+$('btnNew').onclick = function () { clearForm(); };
+$('allFloors').onchange = toggleAll;
+$('perStaff').onchange = togglePerStaff;
+$('overnight').onchange = toggleOvernight;
+$('q').oninput = render;
+
+boot();
+</script>
+</body>
+</html>

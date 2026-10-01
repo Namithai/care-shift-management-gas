@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html>
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<style>
+  :root { --green:#1B5E4A; --line:#d8e0dc; --bg:#f5faf7; --text:#1e2d28; --muted:#6b7a74; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:"Noto Sans JP","Hiragino Kaku Gothic ProN",Meiryo,sans-serif; color:var(--text); background:var(--bg); font-size:14px; }
+  header { background:var(--green); color:#fff; padding:12px 20px; display:flex; align-items:center; gap:16px; }
+  header h1 { font-size:17px; margin:0; font-weight:700; }
+  .layout { display:flex; height:calc(100vh - 46px); }
+  .list-pane { flex:1 1 55%; overflow:auto; padding:14px 16px; }
+  .form-pane { flex:1 1 45%; overflow:auto; padding:14px 16px; background:#fff; border-left:1px solid var(--line); }
+  .filters { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px; align-items:center; }
+  .filters input[type=search], .filters select { padding:6px 8px; border:1px solid var(--line); border-radius:6px; background:#fff; }
+  .filters input[type=search] { width:160px; }
+  button { font-family:inherit; font-size:14px; cursor:pointer; border-radius:6px; padding:7px 14px; border:1px solid var(--green); background:#fff; color:var(--green); }
+  button.primary { background:var(--green); color:#fff; }
+  button.danger { border-color:#b23b3b; color:#b23b3b; }
+  button:disabled { opacity:.5; cursor:default; }
+  table { width:100%; border-collapse:collapse; background:#fff; }
+  th, td { padding:7px 9px; border-bottom:1px solid var(--line); text-align:left; white-space:nowrap; }
+  th { background:var(--green); color:#fff; position:sticky; top:0; font-weight:600; }
+  tbody tr { cursor:pointer; }
+  tbody tr:hover { background:#eaf6f0; }
+  tbody tr.selected { background:#d6f0e3; }
+  tr.retired td { color:var(--muted); }
+  fieldset { border:1px solid var(--line); border-radius:8px; margin:0 0 14px; padding:12px 14px; }
+  legend { font-weight:700; color:var(--green); padding:0 6px; }
+  .field { margin-bottom:10px; }
+  .field label { display:block; font-size:12px; color:var(--muted); margin-bottom:3px; }
+  .field input[type=text], .field input[type=email], .field input[type=number], .field select { width:100%; padding:6px 8px; border:1px solid var(--line); border-radius:6px; }
+  .row2 { display:flex; gap:10px; }
+  .row2 > * { flex:1; }
+  .checks { display:flex; flex-wrap:wrap; gap:14px; }
+  .checks label, .days label { font-size:13px; display:inline-flex; align-items:center; gap:4px; }
+  .days { display:flex; flex-wrap:wrap; gap:10px; }
+  .hint { font-size:12px; color:var(--muted); margin-top:3px; }
+  .actions { display:flex; gap:8px; position:sticky; bottom:0; background:#fff; padding:10px 0; border-top:1px solid var(--line); }
+  .msg { position:fixed; top:12px; left:50%; transform:translateX(-50%); z-index:50; padding:10px 20px; border-radius:8px; box-shadow:0 3px 12px rgba(0,0,0,.2); font-weight:700; display:none; }
+  .msg.err { background:#fdeaea; color:#a02b2b; display:block; }
+  .invalid { border:2px solid #d33 !important; background:#fff4f4 !important; }
+  .checks.invalid { border-radius:6px; padding:4px; }
+  .msg.ok { background:#e6f7ee; color:#14624a; display:block; }
+  .empty { color:var(--muted); padding:20px; text-align:center; }
+</style>
+</head>
+<body>
+<?!= nav ?>
+
+<header>
+  <h1>スタッフマスタ</h1>
+  <span id="count" style="font-size:13px;opacity:.85"></span>
+</header>
+
+<div class="layout">
+  <div class="list-pane">
+    <div class="filters">
+      <input type="search" id="q" placeholder="氏名で検索">
+      <select id="fJob"></select>
+      <select id="fFloor"></select>
+      <select id="fEmp"></select>
+      <select id="fStatus">
+        <option value="在籍">在籍のみ</option>
+        <option value="在職">在籍・休職中</option>
+        <option value="">すべて</option>
+        <option value="休職中">休職中のみ</option>
+        <option value="退職">退職のみ</option>
+      </select>
+      <button class="primary" id="btnNew">新規追加</button>
+    </div>
+    <table>
+      <thead><tr><th>No</th><th>氏名</th><th>職種</th><th>フロア</th><th>雇用形態</th><th>夜勤</th><th>在籍</th></tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+    <div class="empty" id="empty" style="display:none">該当するスタッフがいません</div>
+  </div>
+
+  <div class="form-pane">
+    <div class="msg" id="msg"></div>
+
+    <fieldset>
+      <legend>基本情報</legend>
+      <div class="row2">
+        <div class="field"><label>スタッフNo</label><input type="text" id="staffNo"></div>
+        <div class="field"><label>氏名</label><input type="text" id="name"></div>
+      </div>
+      <div class="field"><label>メールアドレス</label><input type="email" id="email"></div>
+        <div class="field"><label>権限</label><select id="role"><option value="">一般（見るだけ）</option><option value="管理者">管理者</option></select><div class="hint">管理者はシフトを組む・マスタを直すことができます。判定にメールアドレスを使うので、管理者にする人はメールアドレスも入れてください。</div></div>
+      <div class="row2">
+        <div class="field"><label>職種</label><select id="jobType"></select></div>
+        <div class="field"><label>在籍状況</label><select id="status"></select></div>
+      </div>
+        <div class="field"><label>資格（複数選べます）</label><div class="checks" id="quals"></div></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>勤務条件</legend>
+      <div class="row2">
+        <div class="field"><label>担当フロア(主)</label><select id="floorMain"></select></div>
+        <div class="field"><label>雇用形態</label><select id="employment"></select></div>
+      </div>
+      <div class="field"><label>シフト表の表示グループ</label><select id="group"></select><div class="hint" id="groupHint">シフト表でどのタブに出すかを決めます</div></div>
+        <div class="field"><label>兼務フロア（複数選べます）</label><div class="checks" id="floorSub"></div></div>
+      <div class="field"><label>稼働不可曜日</label><div class="days" id="ngDays"></div></div>
+      <div class="row2">
+        <div class="field"><label>希望休の目安（日／月）</label><input type="number" id="wishLimit" min="0" max="31"></div>
+          <div class="field"><label>公休日数（日／月）</label><input type="number" id="offDays" min="0" max="31" placeholder="空欄なら規定どおり（30日以上の月9日・2月8日）"></div>
+          <div class="field"><label>有休残日数（日）</label><input type="number" id="paidLeft" min="0" max="99" placeholder="管理者が付与のときに入力"></div>
+        <div class="field">
+          <label>F勤の勤務時間</label>
+          <div class="row2"><input type="text" id="fStart" placeholder="例）9:00"><input type="text" id="fEnd" placeholder="例）18:00"></div>
+          <div class="hint">F勤を担当する人のみ</div>
+        </div>
+      </div>
+      <div class="field"><div class="checks"><label><input type="checkbox" id="notCounted"> 人員カウント対象外</label></div></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>夜勤・待遇</legend>
+      <div class="field"><div class="checks">
+        <label><input type="checkbox" id="nightOk"> 夜勤可</label>
+        <label><input type="checkbox" id="nightOnly"> 夜勤専従</label>
+        <label><input type="checkbox" id="nightLeader"> 夜勤リーダー可</label>
+      </div></div>
+      <div class="row2">
+        <div class="field"><label>夜勤回数の上限（回／月）</label><input type="number" id="nightMax" min="0" max="31" placeholder="空欄なら自動生成の画面の値を使います"></div>
+        <div class="field"></div>
+      </div>
+      <div class="field">
+        <label>勤務の優先順位</label>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px">
+          <div style="text-align:center"><div style="font-size:12px;color:#555;margin-bottom:2px">優先1</div><select id="prio1"></select></div><div style="text-align:center"><div style="font-size:12px;color:#555;margin-bottom:2px">優先2</div><select id="prio2"></select></div><div style="text-align:center"><div style="font-size:12px;color:#555;margin-bottom:2px">優先3</div><select id="prio3"></select></div><div style="text-align:center"><div style="font-size:12px;color:#555;margin-bottom:2px">優先4</div><select id="prio4"></select></div>
+        </div>
+        <div class="hint">優先1から順に入れます。ここに書いた区分にだけ入ります（4つとも空欄なら、どの区分にも入れます）。</div>
+      </div>
+      <div id="partOnly" style="display:none">
+        <div class="row2">
+          <div class="field"><label>時給（円）</label><input type="number" id="wage" min="0"></div>
+          <div class="field"><label>扶養区分</label><select id="dependent"></select></div>
+        </div>
+        <div class="field"><label>年初からの収入（円）</label><input type="number" id="incomeYtd" min="0"><div class="hint">導入時に1回だけ入力します</div></div>
+      </div>
+    </fieldset>
+
+    <div class="actions">
+      <button class="primary" id="btnSave">保存</button>
+      <button id="btnCancel">取消</button>
+    </div>
+  </div>
+</div>
+
+<script>
+var STAFF = [], OPTS = null, currentRow = 0;
+function $(id) { return document.getElementById(id); }
+
+function showMsg(text, kind) {
+  var m = $('msg'); m.textContent = text; m.className = 'msg ' + kind;
+  if (kind === 'ok') setTimeout(function () { m.className = 'msg'; }, 5000);
+}
+function fail(e) { showMsg(e && e.message ? e.message : String(e), 'err'); }
+
+function fillSelect(sel, items, withBlank) {
+  sel.innerHTML = '';
+  if (withBlank) sel.appendChild(new Option('', ''));
+  items.forEach(function (it) {
+    var v = (typeof it === 'string') ? it : it.code;
+    var l = (typeof it === 'string') ? it : (it.code + '：' + it.label);
+    sel.appendChild(new Option(l, v));
+  });
+}
+
+function boot() {
+  google.script.run.withSuccessHandler(function (o) {
+    OPTS = o;
+    fillSelect($('floorMain'), o.floors, true);
+    fillSelect($('employment'), o.employments, true);
+    fillSelect($('dependent'), o.dependents, true);
+    fillSelect($('status'), o.statuses, false);
+    fillSelect($('jobType'), o.jobTypes, false);
+      fillSelect($('group'), o.groups, true);
+    fillSelect($('prio1'), o.prios || [], true);
+    fillSelect($('prio2'), o.prios || [], true);
+    fillSelect($('prio3'), o.prios || [], true);
+    fillSelect($('prio4'), o.prios || [], true);
+
+    fillSelect($('fFloor'), o.floors, false);
+    $('fFloor').insertBefore(new Option('フロア（すべて）', ''), $('fFloor').firstChild);
+    $('fFloor').value = '';
+    fillSelect($('fEmp'), o.employments, false);
+    $('fEmp').insertBefore(new Option('雇用形態（すべて）', ''), $('fEmp').firstChild);
+    $('fEmp').value = '';
+    fillSelect($('fJob'), o.jobTypes, false);
+    $('fJob').insertBefore(new Option('職種（すべて）', ''), $('fJob').firstChild);
+    $('fJob').value = '';
+
+    var sub = $('floorSub'); sub.innerHTML = '';
+    o.floors.forEach(function (f) {
+      var l = document.createElement('label');
+      l.innerHTML = '<input type="checkbox" value="' + f.code + '"> ' + f.code + '：' + f.label;
+      sub.appendChild(l);
+    });
+    var days = $('ngDays'); days.innerHTML = '';
+    o.weekdays.forEach(function (d) {
+      var l = document.createElement('label');
+      l.innerHTML = '<input type="checkbox" value="' + d + '"> ' + d;
+      days.appendChild(l);
+    });
+    var qs = $('quals'); qs.innerHTML = '';
+    (o.quals || []).forEach(function (qq) {
+      var l = document.createElement('label');
+      l.innerHTML = '<input type="checkbox" value="' + qq + '"> ' + qq;
+      qs.appendChild(l);
+    });
+    loadList();
+  }).withFailureHandler(fail).getMasterOptions();
+}
+
+function loadList() {
+  google.script.run.withSuccessHandler(function (list) {
+    STAFF = list; render(); clearForm();
+  }).withFailureHandler(fail).getStaffList();
+}
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+  });
+}
+
+function render() {
+  var q = $('q').value.trim(), ff = $('fFloor').value, fe = $('fEmp').value, fs = $('fStatus').value, fj = $('fJob').value;
+  var rows = STAFF.filter(function (s) {
+    if (q && s.name.indexOf(q) < 0 && s.staffNo.indexOf(q) < 0) return false;
+    if (ff && s.floorMain !== ff && String(s.floorSub).split(',').indexOf(ff) < 0) return false;
+    if (fe && s.employment !== fe) return false;
+    if (fj && s.jobType !== fj) return false;
+    if (fs === '在職') { if (s.status === '退職') return false; }
+      else if (fs && s.status !== fs) return false;
+    return true;
+  });
+  var tb = $('tbody'); tb.innerHTML = '';
+  rows.forEach(function (s) {
+    var tr = document.createElement('tr');
+    var cls = (s.status === '退職') ? 'retired' : '';
+    if (s.row === currentRow) cls += ' selected';
+    tr.className = cls;
+    tr.innerHTML = '<td>' + esc(s.staffNo) + '</td><td>' + esc(s.name) + '</td><td>' + esc(s.jobType) + '</td><td>' +
+      esc(s.floorMain) + (s.floorSub ? '（＋' + esc(s.floorSub) + '）' : '') + '</td><td>' +
+      esc(s.employment) + '</td><td>' + (s.nightOk ? '可' : '－') + (s.nightLeader ? '／L' : '') +
+      '</td><td>' + esc(s.status) + '</td>';
+    tr.onclick = function () { selectStaff(s.row); };
+    tb.appendChild(tr);
+  });
+  $('empty').style.display = rows.length ? 'none' : 'block';
+  $('count').textContent = rows.length + ' 件 / 全 ' + STAFF.length + ' 件';
+}
+
+function selectStaff(row) {
+  var s = STAFF.filter(function (x) { return x.row === row; })[0];
+  if (!s) return;
+  currentRow = row; setForm(s); render();
+}
+
+function clearForm() {
+  currentRow = 0;
+  setForm({ staffNo:'', name:'', email:'', floorMain:'', floorSub:'', employment:'',
+    wage:'', dependent:'', incomeYtd:'', nightOk:false, nightOnly:false, nightLeader:false,
+    fStart:'', fEnd:'', ngDays:'', wishLimit:3, offDays:'', nightMax:'', prio1:'', prio2:'', prio3:'', prio4:'', notCounted:false, status:'在籍', jobType:'介護職員', qual:'', group:'', role:'', paidLeft:'' });
+  render();
+}
+
+function setForm(s) {
+  $('staffNo').value = s.staffNo; $('name').value = s.name; $('email').value = s.email;
+  $('floorMain').value = s.floorMain; $('employment').value = s.employment;
+  $('group').value = s.group || ''; $('status').value = s.status || '在籍'; $('jobType').value = s.jobType || '介護職員'; $('wishLimit').value = s.wishLimit; $('nightMax').value = (s.nightMax === undefined || s.nightMax === null) ? '' : s.nightMax; $('offDays').value = (s.offDays === undefined || s.offDays === null) ? '' : s.offDays; $('prio1').value = s.prio1 || ''; $('prio2').value = s.prio2 || ''; $('prio3').value = s.prio3 || ''; $('prio4').value = s.prio4 || ''; $('role').value = s.role || ''; $('paidLeft').value = (s.paidLeft === undefined || s.paidLeft === null) ? '' : s.paidLeft;
+  $('fStart').value = s.fStart; $('fEnd').value = s.fEnd;
+  $('wage').value = s.wage; $('dependent').value = s.dependent; $('incomeYtd').value = s.incomeYtd;
+  $('nightOk').checked = !!s.nightOk; $('nightOnly').checked = !!s.nightOnly;
+  $('nightLeader').checked = !!s.nightLeader; $('notCounted').checked = !!s.notCounted;
+
+  var subs = String(s.floorSub || '').split(',').map(function (x) { return x.trim(); });
+  Array.prototype.forEach.call($('floorSub').querySelectorAll('input'), function (c) { c.checked = subs.indexOf(c.value) >= 0; });
+  var days = String(s.ngDays || '').split(',').map(function (x) { return x.trim(); });
+  Array.prototype.forEach.call($('ngDays').querySelectorAll('input'), function (c) { c.checked = days.indexOf(c.value) >= 0; });
+
+  var qls = String(s.qual || '').split(',').map(function (x) { return x.trim(); });
+
+  Array.prototype.forEach.call($('quals').querySelectorAll('input'), function (c) { c.checked = qls.indexOf(c.value) >= 0; });
+
+  clearInvalid();
+  $('groupHint').textContent = GROUP_HINT;
+  togglePart();
+}
+
+function collectChecked(id) {
+  var out = [];
+  Array.prototype.forEach.call($(id).querySelectorAll('input:checked'), function (c) { out.push(c.value); });
+  return out.join(',');
+}
+
+function togglePart() {
+  $('partOnly').style.display = ($('employment').value === 'パート希望日制') ? 'block' : 'none';
+}
+
+function getForm() {
+  return { row: currentRow,
+    staffNo: $('staffNo').value.trim(), name: $('name').value.trim(), email: $('email').value.trim(),
+    floorMain: $('floorMain').value, floorSub: collectChecked('floorSub'), employment: $('employment').value,
+    wage: $('wage').value, dependent: $('dependent').value, incomeYtd: $('incomeYtd').value,
+    nightOk: $('nightOk').checked, nightOnly: $('nightOnly').checked, nightLeader: $('nightLeader').checked,
+    fStart: $('fStart').value.trim(), fEnd: $('fEnd').value.trim(), ngDays: collectChecked('ngDays'),
+    wishLimit: $('wishLimit').value, offDays: $('offDays').value, paidLeft: $('paidLeft').value, nightMax: $('nightMax').value, prio1: $('prio1').value, prio2: $('prio2').value, prio3: $('prio3').value, prio4: $('prio4').value, notCounted: $('notCounted').checked, status: $('status').value,
+    jobType: $('jobType').value, qual: collectChecked('quals'), group: $('group').value, role: $('role').value };
+}
+
+// ===== 担当フロア(主)を選んだら表示グループを仮設定する（あとで自由に変えられる） =====
+var FLOOR_GROUP = { '3': '3階・3階南', 'S': '3階・3階南', '4': '4階', '5': '5階・6階', 'N': '新館' };
+var GROUP_HINT = 'シフト表でどのタブに出すかを決めます';
+$('floorMain').onchange = function () {
+  var g = FLOOR_GROUP[$('floorMain').value];
+  if (g) {
+    $('group').value = g;
+    $('groupHint').textContent = '担当フロアから「' + g + '」を仮設定しました。必要なら変えてください。';
+  }
+};
+
+// ===== 保存時のエラーで、原因の入力欄を赤枠にする =====
+var ERR_FIELDS = [['氏名', 'name'], ['スタッフNo', 'staffNo'], ['担当フロア', 'floorMain'], ['雇用形態', 'employment'],
+  ['職種', 'jobType'], ['表示グループ', 'group'], ['公休日数', 'offDays'], ['有休残日数', 'paidLeft'], ['メールアドレス', 'email'],
+  ['兼務フロア', 'floorSub'], ['F勤', 'fStart'], ['希望休', 'wishLimit'], ['時給', 'wage'], ['収入', 'incomeYtd']];
+function clearInvalid() {
+  Array.prototype.forEach.call(document.querySelectorAll('.invalid'), function (el) { el.classList.remove('invalid'); });
+}
+function markInvalid(msg) {
+  clearInvalid();
+  var text = String(msg || '');
+  for (var i = 0; i < ERR_FIELDS.length; i++) {
+    if (text.indexOf(ERR_FIELDS[i][0]) < 0) continue;
+    var el = $(ERR_FIELDS[i][1]);
+    if (!el) return;
+    el.classList.add('invalid');
+    if (ERR_FIELDS[i][1] === 'fStart') $('fEnd').classList.add('invalid');
+    try { el.scrollIntoView({ block: 'center' }); if (el.focus) el.focus(); } catch (e) {}
+    return;
+  }
+}
+document.querySelector('.form-pane').addEventListener('input', clearInvalid);
+document.querySelector('.form-pane').addEventListener('change', clearInvalid);
+
+$('btnSave').onclick = function () {
+  $('btnSave').disabled = true;
+  google.script.run
+    .withSuccessHandler(function (list) {
+      STAFF = list; $('btnSave').disabled = false; $('btnSave').blur();
+      showMsg('保存しました', 'ok');
+      // 保存した人をそのまま表示し続ける（フォームは空にしない）
+      var no = $('staffNo').value.trim().toUpperCase();
+      var saved = STAFF.filter(function (x) { return String(x.staffNo).trim().toUpperCase() === no; })[0];
+      if (saved) { currentRow = saved.row; setForm(saved); render(); } else { clearForm(); }
+    })
+    .withFailureHandler(function (e) { $('btnSave').disabled = false; fail(e); markInvalid(e && e.message ? e.message : String(e)); })
+    .saveStaff(getForm());
+};
+$('btnCancel').onclick = function () { clearForm(); };
+$('btnNew').onclick = function () { clearForm(); };
+$('employment').onchange = togglePart;
+['q', 'fJob', 'fFloor', 'fEmp', 'fStatus'].forEach(function (id) { $(id).oninput = render; $(id).onchange = render; });
+
+boot();
+</script>
+</body>
+</html>

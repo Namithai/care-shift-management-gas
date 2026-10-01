@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html>
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<style>
+  body{font-family:"Meiryo","Hiragino Kaku Gothic ProN",sans-serif;margin:0;padding:10px 14px;color:#222;background:#fafbfa}
+  h2{font-size:17px;margin:4px 0 10px;color:#1B5E4A}
+  .box{background:#fff;border:1px solid #d7dee6;border-radius:8px;padding:14px 16px;margin-bottom:14px}
+  .row{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:12px}
+  .row label.t{width:80px;font-size:13px;color:#445;font-weight:bold}
+  .kinds{display:flex;gap:8px}
+  .kinds button{font-size:15px;padding:8px 22px;border:2px solid #b9c4ce;background:#fff;border-radius:8px;cursor:pointer}
+  .kinds button.on{background:#1B5E4A;border-color:#1B5E4A;color:#fff}
+  .kinds button.k1.on{background:#2d6cb5;border-color:#2d6cb5}
+  .kinds button.k2.on{background:#c0392b;border-color:#c0392b}
+  select,textarea{font-size:14px;padding:5px 6px;border:1px solid #b9c4ce;border-radius:4px}
+  textarea{width:100%;max-width:720px;min-height:120px;box-sizing:border-box;line-height:1.6}
+  #send{font-size:15px;padding:8px 26px;background:#1B5E4A;color:#fff;border:0;border-radius:6px;cursor:pointer}
+  #send:disabled{background:#9ab;cursor:default}
+  #msg{font-size:13px;margin-left:12px}
+  #msg.ok{color:#1B5E4A;font-weight:bold}
+  #msg.ng{color:#c0392b;font-weight:bold}
+  .hint{font-size:12px;color:#667;margin-top:-4px;margin-bottom:10px}
+  /* 管理者用の一覧 */
+  #admin{display:none}
+  table{border-collapse:collapse;width:100%;font-size:13px}
+  th,td{border:1px solid #d7dee6;padding:6px 8px;vertical-align:top;text-align:left}
+  th{background:#e6efeb;color:#1B5E4A;white-space:nowrap}
+  td.c{white-space:pre-wrap;max-width:360px}
+  td.w{white-space:nowrap}
+  .tag{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;color:#fff}
+  .tag.質問{background:#2d6cb5}.tag.不具合{background:#c0392b}.tag.要望{background:#1B5E4A}
+  tr.done td{color:#889;background:#f6f7f7}
+  td textarea{min-height:48px;width:220px;font-size:13px}
+  td select{font-size:13px}
+  .sv{font-size:12px;padding:4px 10px;cursor:pointer}
+  #cnt{font-size:12px;color:#667;margin-left:8px}
+</style>
+</head>
+<body>
+<?!= nav ?>
+<div class="box">
+  <h2>質問・要望を送る</h2>
+  <div class="row"><label class="t">区分</label>
+    <div class="kinds" id="kinds"></div>
+  </div>
+  <div class="hint">まず「質問」「不具合」「要望」のどれかを選んでください。</div>
+  <div class="row"><label class="t">名前</label><select id="staff"><option value="">-- 選んでください --</option></select></div>
+  <div class="row"><label class="t">画面</label><select id="screen"><option value="">（どの画面のことか。分からなければ空欄でOK）</option></select></div>
+  <div class="row" style="align-items:flex-start"><label class="t">内容</label><textarea id="content" placeholder="例）シフト表で○○を押したら△△になった／□□ができると助かる など"></textarea></div>
+  <div class="row"><label class="t"></label><button id="send">送信</button><span id="msg"></span></div>
+</div>
+
+<div class="box" id="mine" style="display:none">
+  <h2>あなたが送ったものと返答 <span id="mineName"></span></h2>
+  <div class="hint">上で名前を選ぶと、その人が送った分と返答が出ます。返答は「状態」が「対応済み」になると入ります。</div>
+  <div id="mineList"></div>
+</div>
+<div class="box" id="admin">
+  <h2>届いた質問・要望 <span id="cnt"></span></h2>
+  <div class="hint">管理者だけに見えています。状態と返答を書いて「保存」を押してください。</div>
+  <div id="list">読み込み中...</div>
+</div>
+
+<script>
+var KIND = "";
+var OPT = null, STAFF = [], ME = null;
+function el(id){ return document.getElementById(id); }
+function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];}); }
+function msg(t, cls){ var m = el("msg"); m.textContent = t || ""; m.className = cls || ""; }
+
+function init(){
+  google.script.run.withSuccessHandler(function(js){
+    OPT = JSON.parse(js);
+    var k = el("kinds"); k.innerHTML = "";
+    OPT.kinds.forEach(function(name, i){
+      var b = document.createElement("button"); b.type = "button"; b.textContent = name; b.className = "k" + i;
+      b.onclick = function(){ KIND = name; Array.prototype.forEach.call(k.children, function(x){ x.className = x.className.replace(" on",""); }); b.className += " on"; };
+      k.appendChild(b);
+    });
+    var s = el("screen");
+    OPT.screens.forEach(function(name){ var o = document.createElement("option"); o.value = name; o.textContent = name; s.appendChild(o); });
+  }).withFailureHandler(fail).getFeedbackOptionsJson();
+
+  google.script.run.withSuccessHandler(function(js){
+    STAFF = JSON.parse(js);
+    var s = el("staff");
+    STAFF.forEach(function(st){ var o = document.createElement("option"); o.value = st.no; o.textContent = st.name; s.appendChild(o); });
+    pickMe();
+  }).withFailureHandler(fail).getRequestStaffJson();
+
+  google.script.run.withSuccessHandler(function(js){
+    try { ME = JSON.parse(js); } catch(e){ ME = null; }
+    pickMe();
+    if (ME && ME.admin) { el("admin").style.display = "block"; loadList(); }
+  }).withFailureHandler(function(){}).getCurrentUserJson();
+
+  el("send").onclick = send;
+  el("staff").onchange = loadMine;
+}
+function pickMe(){
+  if (!ME || !ME.staffNo) return;
+  var s = el("staff");
+  for (var i=0;i<s.options.length;i++){ if (s.options[i].value === ME.staffNo) { s.selectedIndex = i; break; } }
+  loadMine();
+}
+function fail(e){ msg("エラー：" + (e && e.message ? e.message : e), "ng"); el("send").disabled = false; }
+
+function send(){
+  if (!KIND) { msg("区分（質問／不具合／要望）を選んでください。", "ng"); return; }
+  var s = el("staff");
+  if (!s.value) { msg("名前を選んでください。", "ng"); return; }
+  var content = el("content").value.trim();
+  if (!content) { msg("内容を入力してください。", "ng"); return; }
+  el("send").disabled = true; msg("送信中...");
+  var item = { no: s.value, name: s.options[s.selectedIndex].textContent, kind: KIND, screen: el("screen").value, content: content };
+  google.script.run.withSuccessHandler(function(js){
+    var r = JSON.parse(js);
+    el("send").disabled = false;
+    el("content").value = "";
+    msg("受け付けました。ありがとうございます。" + (r.mail ? "" : "（メール通知は送れませんでしたが内容は保存されています）"), "ok");
+    if (ME && ME.admin) loadList();
+    loadMine();
+  }).withFailureHandler(fail).submitFeedback(item);
+}
+
+/* ---- 送った本人用の一覧 ---- */
+function loadMine(){
+  var s = el("staff");
+  var box = el("mine");
+  if (!s.value) { box.style.display = "none"; return; }
+  box.style.display = "block";
+  el("mineName").textContent = "（" + s.options[s.selectedIndex].textContent + " さん）";
+  el("mineList").innerHTML = '<div class="hint">読み込み中...</div>';
+  google.script.run.withSuccessHandler(function(js){
+    var rows = JSON.parse(js);
+    if (!rows.length) { el("mineList").innerHTML = '<div class="hint">まだ送っていません。</div>'; return; }
+    var h = ['<table><thead><tr><th>日時</th><th>区分</th><th>内容</th><th>状態</th><th>返答</th></tr></thead><tbody>'];
+    rows.forEach(function(r){
+      h.push('<tr' + (r.status === "対応済み" ? ' class="done"' : '') + '>'
+        + '<td class="w">' + esc(r.when) + '</td>'
+        + '<td class="w"><span class="tag ' + esc(r.kind) + '">' + esc(r.kind) + '</span></td>'
+        + '<td class="c">' + esc(r.content) + '</td>'
+        + '<td class="w">' + esc(r.status) + (r.done ? '<div style="font-size:11px;color:#889">' + esc(r.done) + '</div>' : '') + '</td>'
+        + '<td class="c">' + (r.reply ? esc(r.reply) : '<span style="color:#aab">（まだ返答はありません）</span>') + '</td></tr>');
+    });
+    h.push('</tbody></table>');
+    el("mineList").innerHTML = h.join("");
+  }).withFailureHandler(function(e){ el("mineList").innerHTML = '<div class="hint">読めませんでした：' + esc(e && e.message ? e.message : e) + '</div>'; }).getMyFeedbackJson(s.value);
+}
+/* ---- 管理者用の一覧 ---- */
+function loadList(){
+  google.script.run.withSuccessHandler(function(js){
+    loadMine();
+    var rows = JSON.parse(js);
+    el("cnt").textContent = rows.length ? "（" + rows.length + "件、未対応 " + rows.filter(function(r){return r.status !== "対応済み";}).length + "件）" : "";
+    if (!rows.length) { el("list").innerHTML = '<div class="hint">まだ届いていません。</div>'; return; }
+    var h = ['<table><thead><tr><th>日時</th><th>名前</th><th>区分</th><th>画面</th><th>内容</th><th>状態</th><th>返答</th><th></th></tr></thead><tbody>'];
+    rows.forEach(function(r){
+      var opts = OPT.status.map(function(s){ return '<option' + (s === r.status ? ' selected' : '') + '>' + esc(s) + '</option>'; }).join("");
+      h.push('<tr data-row="' + r.row + '"' + (r.status === "対応済み" ? ' class="done"' : '') + '>'
+        + '<td class="w">' + esc(r.when) + '</td><td class="w">' + esc(r.name) + '</td>'
+        + '<td class="w"><span class="tag ' + esc(r.kind) + '">' + esc(r.kind) + '</span></td>'
+        + '<td class="w">' + esc(r.screen) + '</td><td class="c">' + esc(r.content) + '</td>'
+        + '<td class="w"><select class="st">' + opts + '</select>' + (r.done ? '<div style="font-size:11px;color:#889">' + esc(r.done) + '</div>' : '') + '</td>'
+        + '<td><textarea class="rp">' + esc(r.reply) + '</textarea></td>'
+        + '<td class="w"><button class="sv" type="button">保存</button></td></tr>');
+    });
+    h.push('</tbody></table>');
+    el("list").innerHTML = h.join("");
+    Array.prototype.forEach.call(el("list").querySelectorAll("button.sv"), function(b){
+      b.onclick = function(){
+        var tr = b.closest("tr");
+        b.disabled = true; b.textContent = "保存中";
+        google.script.run.withSuccessHandler(function(){ loadList(); })
+          .withFailureHandler(function(e){ alert("保存できませんでした：" + (e && e.message ? e.message : e)); b.disabled = false; b.textContent = "保存"; })
+          .updateFeedback(tr.getAttribute("data-row"), tr.querySelector("select.st").value, tr.querySelector("textarea.rp").value);
+      };
+    });
+  }).withFailureHandler(function(e){ el("list").innerHTML = '<div class="hint">一覧を読めませんでした：' + esc(e && e.message ? e.message : e) + '</div>'; }).getFeedbackListJson();
+}
+window.addEventListener("load", init);
+</script>
+</body>
+</html>
