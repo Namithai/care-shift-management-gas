@@ -316,7 +316,9 @@ function getForm() {
 }
 
 // ===== 担当フロア(主)を選んだら表示グループを仮設定する（あとで自由に変えられる） =====
-var FLOOR_GROUP = { '3': '3階・3階南', 'S': '3階・3階南', '4': '4階', '5': '5階・6階', 'N': '新館' };
+var FLOOR_INFO = <?!= floorInfoJson_() ?>;   // floor シートの内容
+var FLOOR_GROUP = {};
+FLOOR_INFO.forEach(function (f) { FLOOR_GROUP[f.code] = f.group; });
 var GROUP_HINT = 'シフト表でどのタブに出すかを決めます';
 $('floorMain').onchange = function () {
   var g = FLOOR_GROUP[$('floorMain').value];
