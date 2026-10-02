@@ -5,7 +5,8 @@
  *  ・管理者は一覧を見て「状態」「返答」を書ける
  */
 var FEEDBACK_SHEET = 'feedback';
-var FEEDBACK_MAIL_TO = '' /* ここに通知先のメールアドレスを入れる */;
+// 送り先は setting シートの「質問・要望の送り先」に書く（空ならメールは送らず、feedback シートに保存だけする）
+var FEEDBACK_MAIL_TO = '';
 var FEEDBACK_HEAD = ['日時', 'スタッフNo', '名前', '区分', '画面', '内容', '状態', '返答', '対応日'];
 var FEEDBACK_KINDS = ['質問', '不具合', '要望'];
 var FEEDBACK_STATUS = ['未対応', '確認中', '対応済み'];
@@ -64,7 +65,9 @@ function submitFeedback(item) {
       + '画面：' + (screen || '（指定なし）') + '\n\n'
       + '----- 内容 -----\n' + content + '\n----------------\n\n'
       + 'スプレッドシートの feedback シート、またはアプリの「質問・要望」画面で確認できます。';
-    MailApp.sendEmail(FEEDBACK_MAIL_TO, subject, body);
+    var mailTo = getSetting_('質問・要望の送り先', FEEDBACK_MAIL_TO);
+    if (!mailTo) throw new Error('送り先が未設定');
+    MailApp.sendEmail(mailTo, subject, body);
   } catch (e) {
     mailOk = false;   // メールが送れなくても保存は済んでいるので画面には成功で返す
   }
