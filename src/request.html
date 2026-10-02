@@ -73,7 +73,8 @@ var DIRTY = false;
 var PENKIND = "";
 var OFFPEN = "wish";
 
-var FLOORNAME = { "3":"3階", "S":"3階南", "4":"4階", "5":"5階・6階", "N":"新館", "全":"施設全体" };
+var FLOORNAME = { "全":"施設全体" };
+(<?!= floorInfoJson_() ?>).forEach(function (f) { FLOORNAME[f.code] = f.name; });
 var KINDORDER = ["早番","遅番","日勤","F勤","夜勤","看護"];
 var SKIPCODE = ["休","有","希","明"];
 var ASKFN = null;
