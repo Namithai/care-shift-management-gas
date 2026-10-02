@@ -990,7 +990,7 @@ function requireRequestRight_(staffNo) {
   var me = currentUser_();
   if (me.admin) return me;
   if (me.email && me.staffNo && String(staffNo) === me.staffNo) return me;
-  throw new Error('自分の分だけ申請できます。（ほかの人の分は副主任にお願いしてください）');
+  throw new Error('自分の分だけ申請できます。（ほかの人の分は管理者にお願いしてください）');
 }
 
 /** 【検証用】いまの自分の権限を表示する */
