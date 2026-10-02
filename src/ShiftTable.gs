@@ -21,11 +21,11 @@ var SHIFT_SHEET = 'shift';
 var SHIFT_FIXED_COLS = 2;
 var SHIFT_MAX_DAYS = 31;
 
-var FLOOR_LABEL = { '3': '3階', '4': '4階', '5': '5階・6階', 'S': '3階南', 'N': '新館', '全': '全フロア' };
-var FLOOR_ORDER = ['3', '4', '5', 'S', 'N'];
+var FLOOR_LABEL = floorLabelMap_();   // floor シートから作る
+var FLOOR_ORDER = floorCodes_();
 
 // 現行の勤務表と同じ並び（表示グループ）
-var GROUP_ORDER = ['統括部長', '3階・3階南', '4階', '5階・6階', '新館', 'フリー'];
+var GROUP_ORDER = floorGroups_();   // floor シートの「グループ」から作る
 
 /** ------------------------------------------------------------------
  *  初回セットアップ（1回だけ実行する）
@@ -134,7 +134,7 @@ function getShiftMonth(ym) {
     label: ym.replace('-', '年') + '月',
     days: days,
     weekdays: weekdayLabels_(ym, days),
-    requiredHoliday: days >= 30 ? 9 : 8,
+    requiredHoliday: requiredHolidayFor_(ym, days),
     groups: GROUP_ORDER.slice(),
     rows: rows,
     symbols: getSymbolList_(),
@@ -502,15 +502,7 @@ function getRequestStaffJson() {
 }
 
 function reqNormFloor_(s) {
-  var t = String(s).trim();
-  if (!t) return '';
-  if (t === '3' || t === '3階') return '3';
-  if (t === 'S' || t === '3階南') return 'S';
-  if (t === '4' || t === '4階') return '4';
-  if (t === 'N' || t === '新館') return 'N';
-  if (t === '全' || t === '施設全体') return '全';
-  if (t === '5' || t.indexOf('5階') === 0) return '5';
-  return t;
+  return normFloorCode_(s);
 }
 
 function reqSymbols_() {
@@ -816,17 +808,33 @@ function autoWeekday_(ym, day) {
 
 /** 「3階南」→「S」のようにフロア名からコードを引く */
 function autoFloorCode_(label) {
-  var t = String(label || '').trim();
-  for (var c in FLOOR_LABEL) { if (FLOOR_LABEL[c] === t) return c; }
-  if (t === '5階') return '5';
-  if (t === '6階') return '5';
-  if (t === '南館') return 'S';
-  return '';
+  var c = normFloorCode_(label);
+  return (c && c !== '全' && FLOOR_LABEL[c]) ? c : '';
 }
 
 function autoNightSymbol_(code) {
-  if (code === 'N') return '新夜';
+  // symbol シートで「区分＝夜勤」かつそのフロア専用の記号があればそれを使う（例：新館→新夜）
+  var list = getSymbolList_();
+  for (var i = 0; i < list.length; i++) {
+    if (list[i].kind === '夜勤' && list[i].floor && normFloorCode_(list[i].floor) === code) return list[i].sym;
+  }
   return '夜' + String.fromCharCode(32) + code;
+}
+
+/** 勤務パターンで「区分＝日勤」の対象になっているフロア（pattern シートの D 列と H 列） */
+function patternDayFloors_() {
+  var out = {};
+  try {
+    var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('pattern');
+    var v = sh ? sh.getDataRange().getValues() : [];
+    for (var i = 1; i < v.length; i++) {
+      if (String(v[i][7] || '').trim() !== '日勤') continue;
+      var t = String(v[i][3] || '').trim();
+      if (t === '全') { floorCodes_().forEach(function (c) { out[c] = true; }); continue; }
+      t.split(/[,、，]/).forEach(function (x) { var c = normFloorCode_(x); if (c) out[c] = true; });
+    }
+  } catch (e) {}
+  return out;
 }
 
 function autoHeadSym_(v) {
@@ -835,7 +843,9 @@ function autoHeadSym_(v) {
 
 function autoIsNight_(v) {
   var h = autoHeadSym_(v);
-  return (h === '夜' || h === '新夜');
+  if (h === '夜') return true;
+  var m = getSymbolMap_()[h];
+  return !!(m && m.kind === '夜勤');
 }
 
 /** staff シートを夜勤の判定に必要な項目つきで読む */
@@ -845,7 +855,7 @@ function autoStaffNight_(includeNotCounted) {
   if (!sh) return out;
   var last = sh.getLastRow();
   if (last < 2) return out;
-  var v = sh.getRange(2, 1, last - 1, 26).getValues();
+  var v = sh.getRange(2, 1, last - 1, 27).getValues();   // AA列（公休日数）まで読む
   for (var i = 0; i < v.length; i++) {
     var r = v[i];
     var no = String(r[0] || '').trim();
@@ -867,7 +877,9 @@ function autoStaffNight_(includeNotCounted) {
       leader: (r[11] === true || String(r[11]) === 'TRUE'),
       nmax: autoNumOrZero_(r[21]),
       prio: autoPrioList_(r[22], r[23], r[24], r[25]),
-      ngDays: autoSplitList_(String(r[14] || ''))
+      ngDays: autoSplitList_(String(r[14] || '')),
+      emp: String(r[5] || '').trim(),
+      offDays: r[26]
     });
   }
   return out;
@@ -920,7 +932,7 @@ function autoPickNight_(cand, cur, day, code, cnt, wish, used, nDays, ym, opt, l
     var st = cand[i];
     if (used[st.no]) continue;
     if (leaderOnly && !st.leader) continue;
-    if (cnt[st.no] >= autoNightLimit_(st, opt)) continue;
+    if (cnt[st.no] >= autoNightLimit_(st, opt, ym, nDays)) continue;
     if (!autoCanFloor_(st, code)) continue;
     if (!autoNightOk_(cur, st, day, nDays, ym, opt)) continue;
     var sc = autoNightScore_(st, cur, day, code, cnt, wish);
@@ -1017,7 +1029,7 @@ function autoBuildNight_(ym, cur, changes, nDays, opt, log) {
       var best = null;
       for (i = 0; i < todo.length; i++) {
         if (!todo[i].must) continue;
-        if (todo[i].code === 'N') continue;   // 新館担当はリーダーになれない
+        if (!floorLeaderOk_(todo[i].code)) continue;   // floor シートで夜勤リーダー不可のフロア
         var p = autoPickNight_(cand, cur, d, todo[i].code, cnt, wish, used, nDays, ym, opt, true);
         if (p) { best = { st: p.st, score: p.score, i: i }; break; }
       }
@@ -1064,7 +1076,7 @@ function autoBuildNight_(ym, cur, changes, nDays, opt, log) {
         var used2 = {};
         var pick = null;
         var asLeader = false;
-        if (opt.needLeader && base[i].code !== 'N' && !autoDayHasLeader_(cur, cand, d)) {
+        if (opt.needLeader && floorLeaderOk_(base[i].code) && !autoDayHasLeader_(cur, cand, d)) {
           pick = autoPickNight_(cand, cur, d, base[i].code, cnt, wish, used2, nDays, ym, opt2, true);
           if (pick) asLeader = true;
         }
@@ -1110,7 +1122,7 @@ function autoCountCand_(cand, cur, day, code, cnt, used, nDays, ym, opt) {
   for (var i = 0; i < cand.length; i++) {
     var st = cand[i];
     if (used[st.no]) continue;
-    if (cnt[st.no] >= autoNightLimit_(st, opt)) continue;
+    if (cnt[st.no] >= autoNightLimit_(st, opt, ym, nDays)) continue;
     if (!autoCanFloor_(st, code)) continue;
     if (!autoNightOk_(cur, st, day, nDays, ym, opt)) continue;
     n++;
@@ -1233,7 +1245,7 @@ function autoBuildOff_(ym, cur, changes, nDays, opt, log) {
   }
 
   // 常勤：規定日数まで振る。派遣・非常勤も、休みの日数が決まるまでは常勤と同じ扱いにする
-  var quota = (nDays >= 30) ? 9 : 8;
+  var quota = requiredHolidayFor_(ym, nDays);
   var mem = [];
   for (i = 0; i < all.length; i++) if (all[i].emp === '常勤' || all[i].emp === '派遣・非常勤') mem.push(all[i]);
 
@@ -1369,10 +1381,19 @@ function autoNumOrZero_(x) {
  *  ・入っていなくて夜勤専従なら、上限なし（今までどおり）
  *  ・どちらでもなければ、自動生成の画面で入力した全員共通の値を使う
  */
-function autoNightLimit_(st, opt) {
-  if (st.nmax > 0) return st.nmax;
-  if (st.senju) return 999;
-  return Number(opt.nightMax) || 0;
+function autoNightLimit_(st, opt, ym, nDays) {
+  var base;
+  if (st.nmax > 0) base = st.nmax;
+  else if (st.senju) base = 999;
+  else base = Number(opt.nightMax) || 0;
+  // 公休を優先：夜勤1回で「夜・明」の2日を使うので、公休の規定日数が残る回数までにする
+  // （パート希望日制は公休の決め方が違うので対象外）
+  if (ym && nDays && st.emp !== 'パート希望日制') {
+    var quota = autoOffQuota_(st, requiredHolidayFor_(ym, nDays));
+    var cap = Math.floor((nDays - quota) / 2);
+    if (cap < base) base = Math.max(0, cap);
+  }
+  return base;
 }
 
 
@@ -1390,13 +1411,7 @@ function openDayBoard() {
 
 /** フロアの言い方をコード（3・S・4・5・N）にそろえる */
 function dayFloorCode_(x) {
-  var t = String(x || '').trim();
-  if (t === '3階' || t === '3' || t === '3F') return '3';
-  if (t === '3階南' || t === 'S' || t === '南館' || t === '3S') return 'S';
-  if (t === '4階' || t === '4' || t === '4F') return '4';
-  if (t === '5階・6階' || t === '5階' || t === '6階' || t === '5' || t === '6') return '5';
-  if (t === '新館' || t === 'N') return 'N';
-  return t;
+  return normFloorCode_(x);
 }
 
 /** そのマスの人が、その日どのフロアにいるか */
@@ -1433,13 +1448,8 @@ function getDayBoardJson(ym, day) {
     for (i = 0; i < ns.length; i++) if (ns[i].leader) leaders[ns[i].no] = true;
   } catch (e) {}
 
-  var floors = [
-    { code: '3', label: '3F' },
-    { code: 'S', label: '3S' },
-    { code: '4', label: '4F' },
-    { code: '5', label: '5・6F' },
-    { code: 'N', label: '新館' }
-  ];
+  var dayFloors = patternDayFloors_();
+  var floors = floorMaster_().map(function (f) { return { code: f.code, label: f.short || f.name, noDay: !dayFloors[f.code] }; });
 
   var out = { ym: ym, day: d, floors: floors, care: {}, kango: {}, free: [], night: [], after: [], etc: [] };
   for (i = 0; i < floors.length; i++) {
@@ -1912,7 +1922,7 @@ function shiftIssues_(ym, cur, nDays, opt) {
         if (vv.indexOf('★') >= 0) { found = true; break; }
         if (all[i].leader) {
           var kf = autoCellKindFloor_(map, vv);
-          if (kf && kf.kind === '夜勤' && kf.code !== 'N') canPick = true;
+          if (kf && kf.kind === '夜勤' && floorLeaderOk_(kf.code)) canPick = true;
         }
       }
       if (!found) {
@@ -1923,7 +1933,7 @@ function shiftIssues_(ym, cur, nDays, opt) {
   }
 
   // ③ 公休が規定日数に届いていない人（常勤・派遣非常勤）
-  var quota = (nDays >= 30) ? 9 : 8;
+  var quota = requiredHolidayFor_(ym, nDays);
   var offShort = [];
   for (i = 0; i < all.length; i++) {
     if (all[i].emp !== '常勤' && all[i].emp !== '派遣・非常勤') continue;
