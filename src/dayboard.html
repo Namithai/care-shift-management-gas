@@ -164,11 +164,11 @@ function render() {
 
   var b = '';
   // 日勤は 3階・3階南・4階には無い（奥さん確認済み）
-  var NO_DAY = { '3': 1, 'S': 1, '4': 1 };
+  // 日勤の無いフロアは、サーバーから届く floors の noDay で判断する（pattern シートの日勤の対象フロアから作る）
   for (var r = 0; r < rows.length; r++) {
     b += '<tr><th class="rowhead">' + rows[r].label + '</th>';
     for (i = 0; i < f.length; i++) {
-      if (rows[r].key === 'day' && NO_DAY[f[i].code]) { b += '<td class="na"></td>'; continue; }
+      if (rows[r].key === 'day' && f[i].noDay) { b += '<td class="na"></td>'; continue; }
       b += '<td>' + listHtml(DATA.care[f[i].code][rows[r].key]) + '</td>';
     }
     b += '</tr>';
