@@ -191,7 +191,13 @@ var groupKey = 'all';
 var LABELS = { early: '早番', late: '遅番', day: '日勤', free: 'F勤', night: '夜勤', off: '休み' };
 
 var SHOWFLOOR = true;
-var FLOOR_NORM = { '3':'3','3階':'3','三階':'3','4':'4','4階':'4','四階':'4','5':'5','5階':'5','6階':'5','5階・6階':'5','5・6階':'5','5階6階':'5','56':'5','S':'S','s':'S','3階南':'S','3南':'S','南':'S','三階南':'S','N':'N','n':'N','新館':'N','新':'N','全':'全','全フロア':'全','施設全体':'全','全体':'全','共通':'全' };
+var FLOOR_INFO = <?!= floorInfoJson_() ?>;   // floor シートの内容
+var FLOOR_NORM = { '全':'全','全フロア':'全','施設全体':'全','全体':'全','共通':'全' };
+var FLOOR_NOLEAD = {};
+FLOOR_INFO.forEach(function (f) {
+  [f.code, String(f.code).toLowerCase(), f.name, f.kango, f.short].concat(f.alias || []).forEach(function (k) { if (k) FLOOR_NORM[String(k)] = f.code; });
+  if (!f.leader) FLOOR_NOLEAD[f.code] = f.name;
+});
 
 function normFloor(v) {
   var s = String(v == null ? '' : v).trim();
@@ -232,7 +238,8 @@ function countByKindFloor(rows, n) {
 
 function needList() {
   var korder = { early: 0, late: 1, day: 2, free: 3, night: 4 };
-  var forder = { '3': 0, 'S': 1, '4': 2, '5': 3, 'N': 4, '全': 5 };
+  var forder = { '全': 999 };
+  FLOOR_INFO.forEach(function (f, i) { forder[f.code] = i; });
   var out = [];
   (DATA.staffing || []).forEach(function (o) {
     var k = KIND_KEY2[o.kind];
@@ -561,7 +568,7 @@ bindCells();
       var raw = String(row.cells[d - 1] == null ? '' : row.cells[d - 1]);
       var p = splitCell(raw);
       if (classify(p.sym) !== 'night') { setMsg('★は夜勤のマスにだけ付けられます。'); return; }
-      if (p.floor === 'N' || p.sym === '新夜') { setMsg('新館の夜勤はリーダーになれません。'); return; }
+      if (FLOOR_NOLEAD[p.floor] || p.sym === '新夜') { setMsg((FLOOR_NOLEAD[p.floor] || '新館') + 'の夜勤はリーダーになれません。'); return; }
       var okList = (ISSUES && ISSUES.leaderNos) ? ISSUES.leaderNos : null;
       if (raw.indexOf('★') < 0 && okList && okList.indexOf(String(SEL.no)) < 0) {
         setMsg('この人は夜勤リーダー可になっていません（スタッフマスタで確認してください）。');
