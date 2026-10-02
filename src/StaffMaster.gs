@@ -90,6 +90,143 @@ function getFacilityName() {
   return '';
 }
 
+/** settingシートの値を項目名で読む（無ければ def を返す） */
+function getSetting_(key, def) {
+  try {
+    var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_SETTING);
+    if (!sh) return def;
+    var v = sh.getDataRange().getValues();
+    for (var i = 0; i < v.length; i++) {
+      if (String(v[i][0]).trim() === key) {
+        var x = v[i][1];
+        return (x === '' || x === null || x === undefined) ? def : x;
+      }
+    }
+  } catch (e) {}
+  return def;
+}
+
+/** その月の公休の規定日数。holiday シート（月｜公休日数）の値を使う。
+    シートや値が無いときは、これまでどおり 30日以上の月は9日・それ以外は8日 */
+var holidayCache_ = null;   // holiday シートを1回だけ読んで覚えておく（自動で組むときに何千回も呼ばれるため）
+
+function requiredHolidayFor_(ym, days) {
+  var def = days >= 30 ? 9 : 8;
+  try {
+    var month = Number(String(ym).split('-')[1]);
+    if (!month) return def;
+    if (holidayCache_ === null) {
+      holidayCache_ = {};
+      var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('holiday');
+      var v = sh ? sh.getDataRange().getValues() : [];
+      for (var i = 1; i < v.length; i++) {
+        var m = Number(String(v[i][0]).replace('月', '').trim());
+        var n = Number(v[i][1]);
+        if (m && v[i][1] !== '' && !isNaN(n) && n >= 0 && n <= 31) holidayCache_[m] = n;
+      }
+    }
+    return (holidayCache_[month] !== undefined) ? holidayCache_[month] : def;
+  } catch (e) {}
+  return def;
+}
+
+/* ------------------------------------------------------------------
+ *  フロアマスタ（floor シート）
+ *  A 記号(介護) / B 記号(看護) / C 名称 / D 並び順 / E 別名(カンマ区切り)
+ *  F グループ(シフト表のタブ) / G 夜勤リーダー(チェック) / H 略称
+ *  シートが無いときは、最初に作ったときの初期値を使う
+ * ------------------------------------------------------------------ */
+var FLOOR_DEFAULT_ = [
+  { code: '3', kango: '3',  name: '3階',      order: 1, alias: ['3F', '三階'], group: '3階・3階南', leader: true,  short: '3F' },
+  { code: 'S', kango: '南', name: '3階南',    order: 2, alias: ['南館', '3S', '3南', '南', '三階南'], group: '3階・3階南', leader: true, short: '3S' },
+  { code: '4', kango: '4',  name: '4階',      order: 3, alias: ['4F', '四階'], group: '4階', leader: true, short: '4F' },
+  { code: '5', kango: '56', name: '5階・6階', order: 4, alias: ['5階', '6階', '5・6階', '5階6階', '56'], group: '5階・6階', leader: true, short: '5・6F' },
+  { code: 'N', kango: '新', name: '新館',     order: 5, alias: ['新'], group: '新館', leader: false, short: '新館' }
+];
+var floorCache_ = null;
+
+/** フロアの一覧（並び順どおり） */
+function floorMaster_() {
+  if (floorCache_) return floorCache_;
+  var list = [];
+  try {
+    var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('floor');
+    if (sh) {
+      var v = sh.getDataRange().getValues();
+      for (var i = 1; i < v.length; i++) {
+        var code = String(v[i][0] == null ? '' : v[i][0]).trim();
+        if (!code) continue;
+        var name = String(v[i][2] || '').trim() || code;
+        var ord = Number(v[i][3]);
+        var alias = String(v[i][4] || '').split(/[,、，]/).map(function (s) { return s.trim(); }).filter(function (s) { return s; });
+        var lead = v[i][6];
+        list.push({
+          code: code,
+          kango: String(v[i][1] == null ? '' : v[i][1]).trim(),
+          name: name,
+          order: isNaN(ord) || v[i][3] === '' ? 999 + i : ord,
+          alias: alias,
+          group: String(v[i][5] || '').trim() || name,
+          leader: (lead === '' || lead === null || lead === undefined) ? true : (lead === true || String(lead).toUpperCase() === 'TRUE'),
+          short: String(v[i][7] || '').trim() || name
+        });
+      }
+    }
+  } catch (e) {}
+  if (!list.length) list = FLOOR_DEFAULT_.slice();
+  list.sort(function (a, b) { return a.order - b.order; });
+  floorCache_ = list;
+  return list;
+}
+
+/** 記号 → 名称 の対応（'全' は 全フロア） */
+function floorLabelMap_() {
+  var m = {};
+  floorMaster_().forEach(function (f) { m[f.code] = f.name; });
+  m['全'] = '全フロア';
+  return m;
+}
+
+/** 記号の並び */
+function floorCodes_() {
+  return floorMaster_().map(function (f) { return f.code; });
+}
+
+/** シフト表のグループ（統括部長 → 各フロアのグループ → フリー） */
+function floorGroups_() {
+  var out = ['統括部長'];
+  floorMaster_().forEach(function (f) { if (out.indexOf(f.group) < 0) out.push(f.group); });
+  if (out.indexOf('フリー') < 0) out.push('フリー');
+  return out;
+}
+
+/** いろいろな書き方のフロアを記号にそろえる（見つからなければそのまま返す） */
+function normFloorCode_(s) {
+  var t = String(s == null ? '' : s).trim();
+  if (!t) return '';
+  var u = t.split(' ').join('').split('　').join('');
+  if (['全', '全フロア', '施設全体', '全体', '共通'].indexOf(u) >= 0) return '全';
+  var list = floorMaster_();
+  for (var i = 0; i < list.length; i++) {
+    var f = list[i];
+    if (u === f.code || u === f.name || u === f.kango || u === f.short || f.alias.indexOf(u) >= 0) return f.code;
+    if (u.toUpperCase() === String(f.code).toUpperCase()) return f.code;
+  }
+  return t;
+}
+
+/** そのフロアの夜勤からリーダーを選べるか */
+function floorLeaderOk_(code) {
+  var list = floorMaster_();
+  for (var i = 0; i < list.length; i++) if (list[i].code === code) return list[i].leader;
+  return true;
+}
+
+/** 画面（HTML）に渡すフロア情報 */
+function floorInfoJson_() {
+  return JSON.stringify(floorMaster_());
+}
+
 /** 画面の上に出すアプリ名（例：サンプル施設　シフト管理） */
 function appTitle_() {
   var f = getFacilityName();
@@ -183,7 +320,7 @@ function getMasterOptions() {
   for (var i = 1; i < fvals.length; i++) {
     var code = String(fvals[i][0] || '').trim();
     var label = String(fvals[i][2] || '').trim();
-    if (code) floors.push({ code: code, label: label || code });
+    if (code) floors.push({ code: code, label: label || code, group: String(fvals[i][5] || '').trim() || label || code });
   }
 
   return {
@@ -192,7 +329,7 @@ function getMasterOptions() {
     employments: ['常勤', 'パート希望日制', '派遣・非常勤'],
     dependents: ['103万', '106万', '130万', '150万'],
     statuses: ['在籍', '休職中', '退職'],
-    groups: ['統括部長', '3階・3階南', '4階', '5階・6階', '新館', 'フリー'],
+    groups: floorGroups_(),
     quals: getQuals_(),
     prios: getPrioOptions_(),
     weekdays: ['月', '火', '水', '木', '金', '土', '日']
@@ -497,7 +634,7 @@ function setupStaffingSheet() {
   sh.getRange(1, 1, 1, 4).setFontWeight('bold').setBackground('#e8eaed');
   sh.setFrozenRows(1);
 
-  var order = ['3', 'S', '4', '5', 'N'];
+  var order = floorCodes_();
   var floorNames = [];
   for (var j = 0; j < order.length; j++) floorNames.push(FLOOR_LABEL[order[j]]);
 
@@ -562,7 +699,7 @@ function setupSymbolSheet() {
   var kr = SpreadsheetApp.newDataValidation().requireValueInList(KUBUN, true).setAllowInvalid(false).build();
   sh.getRange(2, 2, 199, 1).setDataValidation(kr);
 
-  var order = ['3', 'S', '4', '5', 'N'];
+  var order = floorCodes_();
   var floorNames = [];
   for (var j = 0; j < order.length; j++) floorNames.push(FLOOR_LABEL[order[j]]);
   var fr = SpreadsheetApp.newDataValidation().requireValueInList(floorNames, true).setAllowInvalid(true).build();
@@ -628,7 +765,7 @@ function setupNightSampleData() {
   if (last < 2) { ui.alert('スタッフのデータがありません。'); return; }
 
   var v = sh.getRange(2, 1, last - 1, 21).getValues();
-  var FLOORS = ['3', '4', '5', 'S', 'N'];
+  var FLOORS = floorCodes_();
   var rows = [];
   var i, f;
 
